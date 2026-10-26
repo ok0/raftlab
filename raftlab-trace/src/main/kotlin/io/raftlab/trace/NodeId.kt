@@ -1,6 +1,9 @@
 package io.raftlab.trace
 
+import kotlinx.serialization.Serializable
+
 /** Identifier of a Raft node, ordered lexicographically by [value]. */
+@Serializable
 @JvmInline
 public value class NodeId(
     /** The raw node name, for example `n1`. */

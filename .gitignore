@@ -1,5 +1,6 @@
 .gradle/
 build/
+!build-logic/src/main/kotlin/io/raftlab/build/
 .kotlin/
 .idea/
 *.iml
