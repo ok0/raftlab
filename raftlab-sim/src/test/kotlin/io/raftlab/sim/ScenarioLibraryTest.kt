@@ -15,9 +15,16 @@ class ScenarioLibraryTest {
     }
 
     @Test
-    fun libraryHasExactlyFiveInOrder() {
+    fun libraryHasSixInOrder() {
         ScenarioLibrary.all.keys.toList() shouldBe
-            listOf("normal-election", "leader-crash", "partition-heal", "minority-partition", "client-write")
+            listOf(
+                "normal-election",
+                "leader-crash",
+                "partition-heal",
+                "minority-partition",
+                "client-write",
+                "fuzz-random",
+            )
         ScenarioLibrary.all.forEach { (key, scenario) -> scenario.name shouldBe key }
     }
 

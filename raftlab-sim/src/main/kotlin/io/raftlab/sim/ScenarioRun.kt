@@ -1,6 +1,8 @@
 package io.raftlab.sim
 
 import io.raftlab.core.InMemoryStorage
+import io.raftlab.core.Mutation
+import io.raftlab.core.RaftConfig
 import io.raftlab.core.RaftStorage
 import io.raftlab.kv.KvOp
 import io.raftlab.trace.NodeId
@@ -12,11 +14,18 @@ internal class ScenarioRun(
     override val seed: Long,
     faults: NetworkFaults?,
     checker: InvariantChecker,
+    mutations: Set<Mutation>,
 ) : SimulationView {
+    private val active: Set<Mutation> = mutations.toSortedSet()
+
     internal val sim =
         Simulation(
             seed,
-            SimOptions(nodeCount = spec.nodes, faults = faults ?: spec.faults),
+            SimOptions(
+                nodeCount = spec.nodes,
+                faults = faults ?: spec.faults,
+                raftConfig = RaftConfig(mutations = active),
+            ),
             checker,
             NodeFactory.RAFT,
             hostKv = true,
@@ -100,6 +109,7 @@ internal class ScenarioRun(
     internal fun execute(): ScenarioResult {
         var failure: String? = null
         try {
+            spec.calmAt?.let { t -> sim.post(t) { sim.calm() } }
             for (t in spec.timed) {
                 sim.post(t.time) { t.action(this) }
             }
@@ -140,6 +150,7 @@ internal class ScenarioRun(
             finalState,
             results,
             failure,
+            active,
         )
     }
 

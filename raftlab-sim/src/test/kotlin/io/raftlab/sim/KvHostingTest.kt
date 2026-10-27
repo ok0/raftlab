@@ -17,7 +17,7 @@ fun kvSim(
 class RecordingEndpoint : ClientEndpoint {
     val got = ArrayList<ClientResponse>()
 
-    override fun replyDelay() = 1L
+    override fun replyDelays() = listOf(1L)
 
     override fun receive(response: ClientResponse) {
         got += response

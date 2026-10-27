@@ -6,10 +6,14 @@ import io.raftlab.core.SplitMix64
 internal object SimStreams {
     private const val CLIENT_BASE = 1_000_000L
     private const val SUBMIT_BASE = 2_000_000L
+    private const val FUZZ_BASE = 3_000_000L
 
     fun mix(x: Long): Long = SplitMix64(x).nextLong()
 
     fun network(seed: Long): SplitMix64 = SplitMix64(seed xor mix(0L))
+
+    /** Plan stream of `fuzz-random`; independent of the node, network and client streams. */
+    fun fuzz(seed: Long): SplitMix64 = SplitMix64(seed xor mix(FUZZ_BASE))
 
     fun client(
         seed: Long,

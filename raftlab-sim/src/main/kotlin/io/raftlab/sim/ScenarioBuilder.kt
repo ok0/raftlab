@@ -9,15 +9,24 @@ package io.raftlab.sim
  * `scenario '<name>': `.
  *
  * @property name Name of the scenario.
+ * @property seed Seed of the run being built; actions may derive a randomized plan from it. It is 0 while the
+ * scenario is validated at construction.
  */
 @ScenarioDsl
 public class ScenarioBuilder internal constructor(
     /** Name of the scenario. */
     public val name: String,
+    /**
+     * Seed of the run being built; actions may derive a randomized plan from it. It is 0 while the scenario is
+     * validated at construction.
+     */
+    public val seed: Long = 0L,
 ) {
     private var nodeCount = 5
     private var storageKind: StorageKind = StorageKind.InMemory
     private var networkFaults = NetworkFaults()
+    private var linkFaults = ClientLinkFaults()
+    private var calmAt: Long? = null
     private var load: ClientLoad? = null
     private val timed = ArrayList<ScenarioSpec.TimedAction>()
     private val steps = ArrayList<ScenarioSpec.Step>()
@@ -39,6 +48,26 @@ public class ScenarioBuilder internal constructor(
     /** Sets the network faults of the run. */
     public fun faults(faults: NetworkFaults) {
         networkFaults = faults
+    }
+
+    /**
+     * Sets the client-link faults: drop, duplicate and extra delay of client requests and replies; off by default.
+     *
+     * Requires that [clients] is configured when the faults are enabled.
+     */
+    public fun clientFaults(faults: ClientLinkFaults) {
+        linkFaults = faults
+    }
+
+    /**
+     * From virtual time [time] on, random drops, duplicates and reordering of node messages and all client-link
+     * faults stop; delays and partitions are unaffected.
+     *
+     * @param time Virtual time in ms from which faults stop; must be non-negative.
+     */
+    public fun calmFrom(time: Long) {
+        require(time >= 0) { "scenario '$name': calmFrom(time) must be non-negative: $time" }
+        calmAt = time
     }
 
     /**
@@ -135,12 +164,14 @@ public class ScenarioBuilder internal constructor(
 
     internal fun build(): ScenarioSpec {
         require(steps.isNotEmpty()) { "scenario '$name': has no awaitLeader/runFor step" }
+        require(!linkFaults.enabled || load != null) { "scenario '$name': clientFaults needs clients(...)" }
         return ScenarioSpec(
             name,
             nodeCount,
             storageKind,
             networkFaults,
-            load,
+            calmAt,
+            load?.copy(linkFaults = linkFaults),
             timed.toList(),
             steps.toList(),
             expectations.toList(),

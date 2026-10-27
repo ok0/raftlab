@@ -35,7 +35,7 @@ internal class SimClient(
     private fun send(a: KvClientAction.Send) {
         attempts += a
         val t = ++token
-        sim.clientSend(a.target, a.request, delay(), this)
+        for (d in linkDelays()) sim.clientSend(a.target, a.request, d, this)
         sim.post(sim.now + load.timeout) { if (t == token) onTimer() }
     }
 
@@ -44,7 +44,7 @@ internal class SimClient(
         if (a is KvClientAction.Send) send(a)
     }
 
-    override fun replyDelay(): Long = delay()
+    override fun replyDelays(): List<Long> = linkDelays()
 
     override fun receive(response: ClientResponse) {
         responses += response
@@ -64,4 +64,16 @@ internal class SimClient(
     }
 
     private fun delay(): Long = load.minDelay + random.nextLong(load.maxDelay - load.minDelay + 1)
+
+    private fun linkDelays(): List<Long> {
+        val d = delay()
+        val f = load.linkFaults
+        if (sim.isCalm || !f.enabled) return listOf(d)
+        if (f.dropRate > 0 && random.nextLong(1000) < f.dropRate) return emptyList()
+        val extra = if (f.maxExtraDelay > 0) random.nextLong(f.maxExtraDelay + 1) else 0L
+        if (f.duplicateRate > 0 && random.nextLong(1000) < f.duplicateRate) {
+            return listOf(d + extra, delay() + extra + 1)
+        }
+        return listOf(d + extra)
+    }
 }

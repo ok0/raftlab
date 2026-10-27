@@ -88,6 +88,9 @@ public class Simulation internal constructor(
     public var now: Long = 0
         private set
 
+    internal var isCalm: Boolean = false
+        private set
+
     private val recorder = TraceRecorder { now }
 
     /** Node ids `n1`..`nN` in index order. */
@@ -472,7 +475,15 @@ public class Simulation internal constructor(
     private fun reply(response: ClientResponse) {
         val r = routes.remove(response.requestId) ?: return
         val answer = ClientResponse(r.requestId, response.result)
-        post(now + r.endpoint.replyDelay()) { r.endpoint.receive(answer) }
+        for (d in r.endpoint.replyDelays()) post(now + d) { r.endpoint.receive(answer) }
+    }
+
+    /**
+     * Stops random network and client-link faults from now on; partitions are unaffected.
+     */
+    internal fun calm() {
+        isCalm = true
+        network.calm()
     }
 
     private fun schedule(sent: Sent) {

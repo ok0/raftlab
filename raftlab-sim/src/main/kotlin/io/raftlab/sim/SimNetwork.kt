@@ -83,7 +83,7 @@ internal fun describeMessage(msg: RaftMessage): Pair<MessageKind, String> =
     }
 
 internal class SimNetwork(
-    private val faults: NetworkFaults,
+    private var faults: NetworkFaults,
     private val random: RandomSource,
     private val trace: TraceSink,
     private val members: List<NodeId>,
@@ -91,6 +91,10 @@ internal class SimNetwork(
     private var nextMsgId = 1L
     private val lastAt = HashMap<Pair<NodeId, NodeId>, Long>()
     private var groupOf: Map<NodeId, Int>? = null
+
+    fun calm() {
+        faults = faults.copy(dropRate = 0, duplicateRate = 0, reorder = false)
+    }
 
     fun send(
         msg: RaftMessage,

@@ -5,6 +5,7 @@ internal class ScenarioSpec(
     val nodes: Int,
     val storage: StorageKind,
     val faults: NetworkFaults,
+    val calmAt: Long?,
     val clients: ClientLoad?,
     val timed: List<TimedAction>,
     val steps: List<Step>,

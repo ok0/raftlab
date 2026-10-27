@@ -9,6 +9,7 @@ package io.raftlab.sim
  *
  * `startAt` is the virtual time of the first invocation, `thinkTime` the pause between a return and the next
  * invocation, and `timeout` the delay after which an unanswered request is resent with the same sequence number.
+ * [linkFaults] adds drops, duplicates and extra delay on the client links; it is off by default.
  */
 internal data class ClientLoad(
     val count: Int,
@@ -20,4 +21,5 @@ internal data class ClientLoad(
     val perClientKeys: Boolean,
     val minDelay: Long = 1,
     val maxDelay: Long = 5,
+    val linkFaults: ClientLinkFaults = ClientLinkFaults(),
 )

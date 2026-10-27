@@ -23,7 +23,7 @@ internal class OneShotClient(
         sim.clientSend(target, ClientRequest(1, KvCommand(clientId, 1, op)), delay(), this)
     }
 
-    override fun replyDelay(): Long = delay()
+    override fun replyDelays(): List<Long> = listOf(delay())
 
     override fun receive(response: ClientResponse) {
         val r = response.result

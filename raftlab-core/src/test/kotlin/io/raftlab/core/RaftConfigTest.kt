@@ -40,6 +40,13 @@ class RaftConfigTest {
     }
 
     @Test
+    fun mutationsDefaultToEmpty() {
+        RaftConfig().mutations shouldBe emptySet()
+        RaftConfig(mutations = setOf(Mutation.COMMIT_WITHOUT_MAJORITY)).mutations shouldBe
+            setOf(Mutation.COMMIT_WITHOUT_MAJORITY)
+    }
+
+    @Test
     fun rejectsMaxEntriesPerAppendBelowOne() {
         shouldThrow<IllegalArgumentException> { RaftConfig(maxEntriesPerAppend = 0) }
         shouldThrow<IllegalArgumentException> { RaftConfig(maxEntriesPerAppend = -1) }

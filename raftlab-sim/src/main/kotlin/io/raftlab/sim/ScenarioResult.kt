@@ -1,5 +1,6 @@
 package io.raftlab.sim
 
+import io.raftlab.core.Mutation
 import io.raftlab.trace.TraceEvent
 
 /**
@@ -13,6 +14,7 @@ import io.raftlab.trace.TraceEvent
  * @property finalState Node states at the end of the run.
  * @property expectations Results of the scenario expectations, in declaration order.
  * @property error Message of the failure that stopped the run, or null when the run completed.
+ * @property mutations Injected bugs that were applied to every node in the run.
  */
 public data class ScenarioResult(
     /** Name of the scenario. */
@@ -31,6 +33,8 @@ public data class ScenarioResult(
     public val expectations: List<ExpectationResult>,
     /** Message of the failure that stopped the run, or null when the run completed. */
     public val error: String?,
+    /** Injected bugs that were applied to every node in the run. */
+    public val mutations: Set<Mutation> = emptySet(),
 ) {
     /** True when the run had no error, no violation and every expectation passed. */
     public val passed: Boolean get() = error == null && violations.isEmpty() && expectations.all { it.passed }
@@ -40,6 +44,9 @@ public data class ScenarioResult(
         get() {
             val status = if (passed) "PASSED" else "FAILED"
             val text = StringBuilder("scenario '$scenario' seed $seed: $status")
+            if (mutations.isNotEmpty()) {
+                text.append("\n  mutations: ${mutations.sortedBy { it.ordinal }.joinToString(", ")}")
+            }
             error?.let { text.append("\n  error: $it") }
             violations.forEach { text.append("\n  violation: $it") }
             expectations.filter { !it.passed }.forEach { e ->

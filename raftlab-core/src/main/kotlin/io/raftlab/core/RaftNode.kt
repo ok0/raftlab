@@ -291,14 +291,18 @@ public class RaftNode(
         )
     }
 
-    // Raft §5.4.2 (Figure 8): only current-term entries commit by counting replicas. Single hook point for the
-    // M11 COMMIT_PREVIOUS_TERM_ENTRIES mutation.
-    private fun isCommittable(index: Long): Boolean = termAt(index) == currentTerm
+    // Raft §5.4.2 (Figure 8): only current-term entries commit by counting replicas. With
+    // COMMIT_PREVIOUS_TERM_ENTRIES enabled, earlier-term entries commit by count too.
+    private fun isCommittable(index: Long): Boolean =
+        Mutation.COMMIT_PREVIOUS_TERM_ENTRIES in config.mutations || termAt(index) == currentTerm
 
     private fun advanceLeaderCommit(out: MutableList<Effect>) {
         if (role != Role.LEADER) return
         val sorted = (peers.map { matchIndex.getValue(it) } + lastLogIndex()).sortedDescending()
-        val n = sorted[members.size / 2]
+        val quorum = members.size / 2
+        val position =
+            if (Mutation.COMMIT_WITHOUT_MAJORITY in config.mutations) (quorum - 1).coerceAtLeast(0) else quorum
+        val n = sorted[position]
         if (n > commitIndex && isCommittable(n)) advanceCommitTo(n, out)
     }
 
@@ -412,7 +416,8 @@ public class RaftNode(
         out: MutableList<Effect>,
     ) {
         val upToDate =
-            msg.lastLogTerm > lastLogTerm() ||
+            Mutation.SKIP_LOG_UP_TO_DATE_CHECK in config.mutations ||
+                msg.lastLogTerm > lastLogTerm() ||
                 (msg.lastLogTerm == lastLogTerm() && msg.lastLogIndex >= lastLogIndex())
         val canVote = votedFor == null || votedFor == msg.from
         val grant = canVote && upToDate
