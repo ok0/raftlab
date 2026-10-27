@@ -15,7 +15,7 @@ class ScenarioLibraryTest {
     }
 
     @Test
-    fun libraryHasSixInOrder() {
+    fun libraryHasSevenInOrder() {
         ScenarioLibrary.all.keys.toList() shouldBe
             listOf(
                 "normal-election",
@@ -24,6 +24,7 @@ class ScenarioLibraryTest {
                 "minority-partition",
                 "client-write",
                 "fuzz-random",
+                "restart-all",
             )
         ScenarioLibrary.all.forEach { (key, scenario) -> scenario.name shouldBe key }
     }

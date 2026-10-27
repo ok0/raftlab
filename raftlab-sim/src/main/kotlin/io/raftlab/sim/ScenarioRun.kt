@@ -8,6 +8,8 @@ import io.raftlab.kv.KvOp
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.Role
 import io.raftlab.trace.TraceEvent
+import java.nio.file.Files
+import java.nio.file.Path
 
 internal class ScenarioRun(
     private val spec: ScenarioSpec,
@@ -17,6 +19,17 @@ internal class ScenarioRun(
     mutations: Set<Mutation>,
 ) : SimulationView {
     private val active: Set<Mutation> = mutations.toSortedSet()
+
+    private val durableProvider: DurableStorageProvider? =
+        (spec.storage as? StorageKind.Durable)?.let { kind ->
+            kind.provider ?: DurableStorageProvider.discover()
+                ?: error(
+                    "scenario '${spec.name}': StorageKind.Durable needs a DurableStorageProvider registered in " +
+                        "META-INF/services/io.raftlab.sim.DurableStorageProvider",
+                )
+        }
+
+    private val dataRoot: Path? = durableProvider?.let { Files.createTempDirectory(TEMP_PREFIX) }
 
     internal val sim =
         Simulation(
@@ -30,6 +43,7 @@ internal class ScenarioRun(
             NodeFactory.RAFT,
             hostKv = true,
             storageFactory = storageFor(spec.storage),
+            reopenStorage = durableProvider != null,
         )
 
     private val recorder = HistoryRecorder(sim)
@@ -106,7 +120,14 @@ internal class ScenarioRun(
             client.clientId
         }
 
-    internal fun execute(): ScenarioResult {
+    internal fun execute(): ScenarioResult =
+        try {
+            collect()
+        } finally {
+            dataRoot?.toFile()?.deleteRecursively()
+        }
+
+    private fun collect(): ScenarioResult {
         var failure: String? = null
         try {
             spec.calmAt?.let { t -> sim.post(t) { sim.calm() } }
@@ -178,7 +199,14 @@ internal class ScenarioRun(
         )
 
     private fun storageFor(kind: StorageKind): (NodeId) -> RaftStorage {
+        val provider = durableProvider
+        val root = dataRoot
+        if (provider != null && root != null) return { id -> provider.open(root.resolve(id.value)) }
         if (kind is StorageKind.Custom) return kind.factory
         return { _ -> InMemoryStorage() }
+    }
+
+    private companion object {
+        const val TEMP_PREFIX = "raftlab-run-"
     }
 }

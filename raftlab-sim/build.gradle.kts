@@ -6,6 +6,7 @@ dependencies {
     api(project(":raftlab-core"))
     api(project(":raftlab-trace"))
     api(project(":raftlab-kv"))
+    testImplementation(project(":raftlab-storage-file"))
 }
 
 val fuzzSeeds = providers.gradleProperty("raftlab.fuzz.seeds").orElse("1000")

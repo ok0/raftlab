@@ -39,6 +39,7 @@ public class Simulation internal constructor(
     private val factory: NodeFactory,
     private val hostKv: Boolean = false,
     private val storageFactory: (NodeId) -> RaftStorage = { _ -> InMemoryStorage() },
+    private val reopenStorage: Boolean = false,
 ) {
     /** Creates a simulation with the RaftNode implementation, the given options and invariant checker. */
     public constructor(
@@ -66,7 +67,7 @@ public class Simulation internal constructor(
         val id: NodeId,
         val index: Int,
     ) {
-        val storage: RaftStorage = storageFactory(id)
+        var storage: RaftStorage = storageFactory(id)
         var stateMachine = RecordingStateMachine()
         val random = SimStreams.node(seed, index)
         var host: HostedNode? = null
@@ -195,11 +196,14 @@ public class Simulation internal constructor(
     /**
      * Restarts a crashed node from its persisted storage.
      *
+     * When the run reopens storage, a new storage instance is opened from the node's persisted files first.
+     *
      * @param id Node to restart; must be crashed.
      */
     public fun restart(id: NodeId) {
         val s = slot(id)
         check(s.host == null) { "node ${id.value} is not crashed" }
+        if (reopenStorage) s.storage = storageFactory(id)
         start(s)
         recorder.emit { seq, time -> NodeRestarted(seq, time, id) }
         queue.push((now / options.tickMillis + 1) * options.tickMillis, SimEvent.Tick(id, s.incarnation))
