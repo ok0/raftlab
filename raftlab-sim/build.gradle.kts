@@ -5,4 +5,5 @@ plugins {
 dependencies {
     api(project(":raftlab-core"))
     api(project(":raftlab-trace"))
+    api(project(":raftlab-kv"))
 }
