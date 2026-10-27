@@ -9,4 +9,4 @@ dependencyResolutionManagement {
     repositories { mavenCentral() }
 }
 rootProject.name = "raftlab"
-include(":raftlab-trace", ":raftlab-core", ":raftlab-sim", ":raftlab-viz", ":raftlab-docs")
+include(":raftlab-trace", ":raftlab-core", ":raftlab-kv", ":raftlab-sim", ":raftlab-viz", ":raftlab-docs")
