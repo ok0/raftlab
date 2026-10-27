@@ -266,6 +266,8 @@ Requirements: JDK 21 or newer (the toolchain is 21; CI also runs Gradle on JDK 2
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request workflow and commit message rules, and [docs/README.md](docs/README.md) for the design notes.
 
+Acceptance evidence for every project acceptance criterion, and the checklist to run after the first push, are in [docs/acceptance.md](docs/acceptance.md).
+
 ## Status and limitations
 
 - raftlab is an educational project and is **not production-ready**.
