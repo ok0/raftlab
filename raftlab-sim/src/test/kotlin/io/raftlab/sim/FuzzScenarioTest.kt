@@ -2,6 +2,7 @@ package io.raftlab.sim
 
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.raftlab.core.RaftConfig
 import io.raftlab.trace.DropReason
 import io.raftlab.trace.MessageDropped
 import io.raftlab.trace.MessageDuplicated
@@ -10,6 +11,8 @@ import io.raftlab.trace.NodeRestarted
 import io.raftlab.trace.PartitionChanged
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
+import io.raftlab.trace.SnapshotInstalled
+import io.raftlab.trace.SnapshotTaken
 import io.raftlab.trace.TraceEvent
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -47,6 +50,8 @@ internal class FuzzScenarioTest {
         } shouldBe true
         plans.all { p -> p.partitions.zipWithNext().all { (a, b) -> a.end < b.start } } shouldBe true
         plans.all { it.clientCount * it.opsPerClient <= 200 } shouldBe true
+        (plans.any { it.snapshotThreshold <= 8 }) shouldBe true
+        (plans.any { it.snapshotThreshold == RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD }) shouldBe true
     }
 
     @Tag("fuzz")
@@ -75,7 +80,26 @@ internal class FuzzScenarioTest {
         (executed.any { (run, _) -> run.clients.any { it.attempts.size > it.ops.size } }) shouldBe true
         val sizes = results.map { it.finalState.size }.toSet()
         (sizes.contains(3) && sizes.contains(5)) shouldBe true
+        val takenSeeds = results.count { r -> r.trace.any { it is SnapshotTaken } }
+        val installedSeeds = results.count { r -> r.trace.any { it is SnapshotInstalled } }
+        val restartedAfterSnapshotSeeds = results.count { r -> restartsAfterSnapshot(r.trace) }
+        println(
+            "fuzz snapshot coverage: SnapshotTaken seeds=$takenSeeds, SnapshotInstalled seeds=$installedSeeds, " +
+                "restart after snapshot seeds=$restartedAfterSnapshotSeeds",
+        )
+        (takenSeeds >= 10) shouldBe true
+        (installedSeeds >= 3) shouldBe true
+        (restartedAfterSnapshotSeeds >= 1) shouldBe true
     }
+
+    private fun restartsAfterSnapshot(trace: List<TraceEvent>): Boolean =
+        trace.indices.any { i ->
+            val restart = trace[i]
+            restart is NodeRestarted &&
+                trace.subList(0, i).any { e ->
+                    (e is SnapshotTaken || e is SnapshotInstalled) && e.node == restart.node
+                }
+        }
 
     private fun crashesLeader(trace: List<TraceEvent>): Boolean =
         trace.indices.any { i ->

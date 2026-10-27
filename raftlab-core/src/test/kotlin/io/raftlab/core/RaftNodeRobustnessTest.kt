@@ -46,7 +46,8 @@ class RaftNodeRobustnessTest {
     @Test
     fun ignoresUnexpectedMessageTypes() {
         val node = node()
-        node.receive(InstallSnapshot(0, n2, n1, 0, 0, three, ByteArray(0))) shouldBe emptyList<Effect>()
+        node.receive(InstallSnapshot(0, n2, n1, 0, 0, three, ByteArray(0))) shouldBe
+            listOf<Effect>(Effect.Send(InstallSnapshotResponse(0, n1, n2, 0)))
         node.receive(InstallSnapshotResponse(0, n2, n1, 0)) shouldBe emptyList<Effect>()
         node.receive(TimeoutNow(0, n2, n1)) shouldBe emptyList<Effect>()
         node.receive(AppendEntriesResponse(0, n2, n1, true, 0, 0, 0, 0)) shouldBe emptyList<Effect>()

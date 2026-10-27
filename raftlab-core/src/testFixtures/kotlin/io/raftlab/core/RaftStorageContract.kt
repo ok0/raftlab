@@ -159,4 +159,84 @@ public abstract class RaftStorageContract {
         storage.saveSnapshot(meta(1, 1), byteArrayOf())
         shouldThrow<IllegalArgumentException> { storage.compactTo(2) }
     }
+
+    /** Compacting to the last index leaves an empty log whose base keeps its term, and the base survives a reopen. */
+    @Test
+    public fun compactToLastIndexLeavesEmptyLogWithBase() {
+        val storage = createStorage()
+        storage.append(listOf(e(1, 1), e(2, 1), e(3, 2)))
+        storage.saveSnapshot(meta(3, 2), byteArrayOf(5))
+        storage.compactTo(3)
+        val check = { s: RaftStorage ->
+            s.lastIndex() shouldBe 3L
+            s.termAt(3) shouldBe 2L
+            s.termAt(2) shouldBe null
+            s.entries(4, 4) shouldBe emptyList()
+        }
+        check(storage)
+        val reopened = reopen(storage)
+        check(reopened)
+        reopened.loadSnapshot() shouldBe Snapshot(meta(3, 2), byteArrayOf(5))
+        reopened.append(listOf(e(4, 3)))
+        reopened.termAt(4) shouldBe 3L
+    }
+
+    /** A compacted log keeps its retained entries and base term across a reopen. */
+    @Test
+    public fun compactedLogSurvivesReopen() {
+        val storage = createStorage()
+        storage.append(listOf(e(1, 1), e(2, 1), e(3, 2), e(4, 2), e(5, 3)))
+        storage.saveSnapshot(meta(3, 2), byteArrayOf(1, 2))
+        storage.compactTo(3)
+        val r = reopen(storage)
+        r.lastIndex() shouldBe 5L
+        r.entries(4, 6) shouldBe listOf(e(4, 2), e(5, 3))
+        r.termAt(3) shouldBe 2L
+        r.termAt(2) shouldBe null
+        r.loadSnapshot() shouldBe Snapshot(meta(3, 2), byteArrayOf(1, 2))
+        r.loadSnapshot()!!.meta.members shouldBe setOf(NodeId("n1"), NodeId("n2"))
+    }
+
+    /** Truncating above a compacted base keeps the base term and allows appending again. */
+    @Test
+    public fun truncateAfterCompactionKeepsBase() {
+        val storage = createStorage()
+        storage.append(listOf(e(1, 1), e(2, 1), e(3, 2), e(4, 2), e(5, 3)))
+        storage.saveSnapshot(meta(3, 2), byteArrayOf(1, 2))
+        storage.compactTo(3)
+        storage.truncateFrom(4)
+        storage.lastIndex() shouldBe 3L
+        storage.termAt(3) shouldBe 2L
+        storage.append(listOf(e(4, 5)))
+        storage.termAt(4) shouldBe 5L
+    }
+
+    /** A later snapshot replaces the earlier base and compacting through it empties the log. */
+    @Test
+    public fun laterSnapshotReplacesEarlier() {
+        val storage = createStorage()
+        storage.append(listOf(e(1, 1), e(2, 1), e(3, 2), e(4, 2), e(5, 3)))
+        storage.saveSnapshot(meta(3, 2), byteArrayOf(1))
+        storage.compactTo(3)
+        storage.saveSnapshot(meta(6, 3), byteArrayOf(6))
+        storage.compactTo(6)
+        storage.lastIndex() shouldBe 6L
+        storage.termAt(6) shouldBe 3L
+        storage.termAt(3) shouldBe null
+        storage.entries(7, 7) shouldBe emptyList()
+        storage.append(listOf(e(7, 3)))
+    }
+
+    /** Repeating or lowering a compaction index changes nothing and does not throw. */
+    @Test
+    public fun compactToIsIdempotent() {
+        val storage = createStorage()
+        storage.append(listOf(e(1, 1), e(2, 1), e(3, 2), e(4, 2)))
+        storage.saveSnapshot(meta(3, 2), byteArrayOf(1))
+        storage.compactTo(3)
+        storage.compactTo(3)
+        storage.compactTo(2)
+        storage.lastIndex() shouldBe 4L
+        storage.entries(4, 5) shouldBe listOf(e(4, 2))
+    }
 }

@@ -52,4 +52,17 @@ class RaftConfigTest {
         shouldThrow<IllegalArgumentException> { RaftConfig(maxEntriesPerAppend = -1) }
         RaftConfig(maxEntriesPerAppend = 1).maxEntriesPerAppend shouldBe 1
     }
+
+    @Test
+    fun defaultSnapshotThresholdIs1000() {
+        RaftConfig().snapshotThreshold shouldBe 1000
+        RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD shouldBe 1000
+    }
+
+    @Test
+    fun rejectsSnapshotThresholdBelowOne() {
+        shouldThrow<IllegalArgumentException> { RaftConfig(snapshotThreshold = 0) }
+        shouldThrow<IllegalArgumentException> { RaftConfig(snapshotThreshold = -5) }
+        RaftConfig(snapshotThreshold = 1).snapshotThreshold shouldBe 1
+    }
 }

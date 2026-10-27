@@ -32,8 +32,13 @@ internal object ScenarioChecks {
     fun logsConverged(nodes: List<NodeView>): Boolean {
         if (!nodes.all { it.up }) return false
         val head = nodes.firstOrNull() ?: return true
+        val base = nodes.maxOf { it.snapshotIndex }
+
+        fun tail(v: NodeView) = v.log.filter { it.index > base }
+        val ht = tail(head)
         return nodes.all {
-            it.log == head.log && it.commitIndex == head.commitIndex && it.lastApplied == head.lastApplied
+            it.lastIndex == head.lastIndex && tail(it) == ht &&
+                it.commitIndex == head.commitIndex && it.lastApplied == head.lastApplied
         }
     }
 

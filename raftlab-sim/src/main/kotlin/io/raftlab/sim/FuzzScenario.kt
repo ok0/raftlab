@@ -14,7 +14,7 @@ import java.util.TreeMap
  * nodes are restarted; a final write to [FINAL_KEY] is submitted to the leader at [FINAL_WRITE_AT]; the run ends at
  * [END]. The interval from [CALM_AT] to [END] is the settle period in which clients finish and the cluster converges.
  * Expectations: one live leader, all nodes up, all client operations completed, logs and data agree, and the final
- * write committed.
+ * write committed. The snapshot threshold is drawn too, by [FuzzPlan.draw].
  */
 internal object FuzzScenario {
     /** Name of the scenario. */
@@ -49,6 +49,7 @@ internal object FuzzScenario {
             var finalClient: String? = null
             nodes(plan.nodes)
             faults(plan.faults)
+            snapshotThreshold(plan.snapshotThreshold)
             clients(
                 plan.clientCount,
                 plan.opsPerClient,

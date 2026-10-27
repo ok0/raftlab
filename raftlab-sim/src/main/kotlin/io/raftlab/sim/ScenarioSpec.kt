@@ -1,5 +1,7 @@
 package io.raftlab.sim
 
+import io.raftlab.core.RaftConfig
+
 internal class ScenarioSpec(
     val name: String,
     val nodes: Int,
@@ -10,6 +12,7 @@ internal class ScenarioSpec(
     val timed: List<TimedAction>,
     val steps: List<Step>,
     val expectations: List<Expectation>,
+    val snapshotThreshold: Int = RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD,
 ) {
     class TimedAction(
         val time: Long,

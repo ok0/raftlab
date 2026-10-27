@@ -37,7 +37,7 @@ internal class ScenarioRun(
             SimOptions(
                 nodeCount = spec.nodes,
                 faults = faults ?: spec.faults,
-                raftConfig = RaftConfig(mutations = active),
+                raftConfig = RaftConfig(mutations = active, snapshotThreshold = spec.snapshotThreshold),
             ),
             checker,
             NodeFactory.RAFT,
@@ -196,6 +196,7 @@ internal class ScenarioRun(
             lastApplied = s.lastApplied,
             log = s.log,
             kvData = if (s.up) (sim.kvData(s.id) ?: emptyMap()) else emptyMap(),
+            snapshotIndex = s.snapshotIndex,
         )
 
     private fun storageFor(kind: StorageKind): (NodeId) -> RaftStorage {

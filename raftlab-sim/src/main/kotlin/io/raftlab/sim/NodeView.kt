@@ -25,8 +25,13 @@ public data class NodeView(
     public val commitIndex: Long,
     /** Highest log index applied to the state machine, or 0 when crashed. */
     public val lastApplied: Long,
-    /** The node's log entries (persisted, also while crashed). */
+    /** The node's retained entries after [snapshotIndex] (persisted, also while crashed). */
     public val log: List<LogEntry>,
     /** The key-value data of the node, sorted by key; empty when crashed. */
     public val kvData: Map<String, String>,
-)
+    /** Last log index covered by the node's snapshot, or 0 without one. */
+    public val snapshotIndex: Long = 0,
+) {
+    /** Last log index: of the last retained entry, or [snapshotIndex] when the retained log is empty. */
+    public val lastIndex: Long get() = log.lastOrNull()?.index ?: snapshotIndex
+}

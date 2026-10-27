@@ -30,12 +30,53 @@ class RecordingStorage(
     private val delegate: InMemoryStorage = InMemoryStorage(),
 ) : RaftStorage by delegate {
     val saves = mutableListOf<PersistentState>()
+    val ops = mutableListOf<String>()
     var failSaves = false
 
     override fun saveState(state: PersistentState) {
         check(!failSaves) { "injected storage failure" }
         saves += state
         delegate.saveState(state)
+    }
+
+    override fun saveSnapshot(
+        meta: SnapshotMeta,
+        data: ByteArray,
+    ) {
+        ops += "saveSnapshot(${meta.lastIndex})"
+        delegate.saveSnapshot(meta, data)
+    }
+
+    override fun compactTo(index: Long) {
+        ops += "compactTo($index)"
+        delegate.compactTo(index)
+    }
+
+    override fun truncateFrom(index: Long) {
+        ops += "truncateFrom($index)"
+        delegate.truncateFrom(index)
+    }
+}
+
+class SnapshotStateMachine : StateMachine {
+    val applied = mutableListOf<Long>()
+    val restores = mutableListOf<String>()
+
+    override fun apply(
+        index: Long,
+        command: ByteArray,
+    ): ByteArray {
+        applied += index
+        return "r$index".encodeToByteArray()
+    }
+
+    override fun snapshot(): ByteArray = applied.joinToString(",").encodeToByteArray()
+
+    override fun restore(data: ByteArray) {
+        val text = data.decodeToString()
+        restores += text
+        applied.clear()
+        if (text.isNotEmpty()) applied += text.split(",").map { it.toLong() }
     }
 }
 
@@ -188,3 +229,35 @@ private fun RaftNode.winElectionWith(voters: List<NodeId>): List<Effect> {
 }
 
 fun recorder() = TraceRecorder { 0L }
+
+fun isnap(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    lastIndex: Long,
+    lastTerm: Long,
+    members: Set<NodeId> = three,
+    data: ByteArray = ByteArray(0),
+) = InstallSnapshot(term, from, to, lastIndex, lastTerm, members, data)
+
+fun isr(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    lastIndex: Long,
+) = InstallSnapshotResponse(term, from, to, lastIndex)
+
+fun compactedStorage(
+    snapshotIndex: Long,
+    vararg terms: Long,
+    currentTerm: Long = terms.max(),
+    members: Set<NodeId> = three,
+    data: ByteArray = ByteArray(0),
+): InMemoryStorage {
+    val storage = InMemoryStorage()
+    storage.saveState(PersistentState(currentTerm, null))
+    storage.append(logWithTerms(*terms))
+    storage.saveSnapshot(SnapshotMeta(snapshotIndex, terms[(snapshotIndex - 1).toInt()], members), data)
+    storage.compactTo(snapshotIndex)
+    return storage
+}

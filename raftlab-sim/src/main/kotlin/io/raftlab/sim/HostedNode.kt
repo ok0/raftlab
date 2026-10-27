@@ -21,6 +21,7 @@ internal interface HostedNode {
     val members: Set<NodeId>
     val commitIndex: Long
     val lastApplied: Long
+    val snapshotIndex: Long get() = 0L
 
     fun step(input: Input): List<Effect>
 
@@ -38,6 +39,7 @@ internal class RaftNodeHost(
     override val members: Set<NodeId> get() = node.members
     override val commitIndex: Long get() = node.commitIndex
     override val lastApplied: Long get() = node.lastApplied
+    override val snapshotIndex: Long get() = node.snapshotIndex
 
     override fun step(input: Input): List<Effect> = node.step(input)
 

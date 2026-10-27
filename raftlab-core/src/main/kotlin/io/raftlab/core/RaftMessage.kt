@@ -153,7 +153,7 @@ public data class InstallSnapshotResponse(
     override val from: NodeId,
     /** Node the message is addressed to. */
     override val to: NodeId,
-    /** Index of the snapshot the follower now holds. */
+    /** Index through which the follower now matches the leader: the installed snapshot's last index, or the follower's commit index when the snapshot was stale or duplicate; 0 in a reply to a lower-term sender. */
     public val lastIndex: Long,
 ) : RaftMessage
 

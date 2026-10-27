@@ -23,6 +23,8 @@ import java.nio.file.StandardOpenOption
  *
  * Every write is fsynced before the call returns. On open, leftover `*.tmp` files from interrupted replacements are
  * deleted, and a torn or damaged log tail, starting at the first invalid record, is discarded and truncated away.
+ * A snapshot whose last index is above the log's compacted index (left by a crash between saving the snapshot and
+ * compacting) is completed on open by compacting the log through it.
  * A snapshot whose data does not match its metadata makes the open fail. There is no clock, no randomness and no
  * thread: the same operations on an empty directory always produce the same bytes.
  *
@@ -67,6 +69,8 @@ public class FileStorage(
         if (end < bytes.size) {
             truncateLogFile(end)
         }
+        val saved = snapshot
+        if (saved != null && saved.meta.lastIndex > compactedIndex) compactTo(saved.meta.lastIndex)
     }
 
     /** Returns the persisted state read from disk, or `PersistentState(0, null)` for a fresh directory. */

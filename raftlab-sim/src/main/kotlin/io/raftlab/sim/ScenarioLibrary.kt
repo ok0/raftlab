@@ -5,13 +5,14 @@ package io.raftlab.sim
  *
  * It contains `normal-election`, `leader-crash`, `partition-heal`, `minority-partition`, `client-write` and
  * `fuzz-random`; later milestones add more scenarios. `fuzz-random` draws its faults and client load randomly from
- * its seed. `restart-all` uses `StorageKind.Durable` and needs a registered `DurableStorageProvider`.
+ * its seed. `restart-all` uses `StorageKind.Durable` and needs a registered `DurableStorageProvider`. It is followed by
+ * `lagging-follower-snapshot`, which exercises snapshot installation on a lagging follower.
  */
 public object ScenarioLibrary {
     /**
      * All library scenarios keyed by name, in the order `normal-election`, `leader-crash`, `partition-heal`,
-     * `minority-partition`, `client-write`, `fuzz-random`, `restart-all`. `restart-all` uses `StorageKind.Durable` and
-     * needs a registered `DurableStorageProvider`.
+     * `minority-partition`, `client-write`, `fuzz-random`, `restart-all`, `lagging-follower-snapshot`. `restart-all` uses
+     * `StorageKind.Durable` and needs a registered `DurableStorageProvider`.
      */
     public val all: Map<String, Scenario> =
         listOf(
@@ -22,9 +23,10 @@ public object ScenarioLibrary {
             ClientWriteScenario.scenario,
             FuzzScenario.scenario,
             RestartAllScenario.scenario,
+            LaggingFollowerSnapshotScenario.scenario,
         ).associateBy { it.name }
 
     init {
-        require(all.size == 7) { "duplicate scenario name" }
+        require(all.size == 8) { "duplicate scenario name" }
     }
 }

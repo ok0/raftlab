@@ -3,9 +3,11 @@ package io.raftlab.sim
 import io.raftlab.core.Effect
 import io.raftlab.core.InMemoryStorage
 import io.raftlab.core.Input
+import io.raftlab.core.LogEntry
 import io.raftlab.core.RaftMessage
 import io.raftlab.core.RaftNode
 import io.raftlab.core.RaftStorage
+import io.raftlab.core.Snapshot
 import io.raftlab.kv.ClientRequest
 import io.raftlab.kv.ClientResponse
 import io.raftlab.kv.KvServer
@@ -68,6 +70,7 @@ public class Simulation internal constructor(
         val index: Int,
     ) {
         var storage: RaftStorage = storageFactory(id)
+        var snapshotCache: Snapshot? = storage.loadSnapshot()
         var stateMachine = RecordingStateMachine()
         val random = SimStreams.node(seed, index)
         var host: HostedNode? = null
@@ -185,6 +188,7 @@ public class Simulation internal constructor(
     public fun crash(id: NodeId) {
         val s = slot(id)
         check(s.host != null) { "node ${id.value} is already crashed" }
+        s.snapshotCache = s.storage.loadSnapshot()
         s.host = null
         s.server = null
         s.kvMachine = null
@@ -204,6 +208,7 @@ public class Simulation internal constructor(
         val s = slot(id)
         check(s.host == null) { "node ${id.value} is not crashed" }
         if (reopenStorage) s.storage = storageFactory(id)
+        s.snapshotCache = s.storage.loadSnapshot()
         start(s)
         recorder.emit { seq, time -> NodeRestarted(seq, time, id) }
         queue.push((now / options.tickMillis + 1) * options.tickMillis, SimEvent.Tick(id, s.incarnation))
@@ -302,6 +307,7 @@ public class Simulation internal constructor(
     private fun snapshot(s: NodeSlot): NodeState {
         val p = s.storage.loadState()
         val h = s.host
+        val snap = currentSnapshot(s)
         return if (h != null) {
             NodeState(
                 s.id,
@@ -315,6 +321,7 @@ public class Simulation internal constructor(
                 h.commitIndex,
                 h.lastApplied,
                 s.incarnation,
+                snap,
             )
         } else {
             NodeState(
@@ -325,12 +332,29 @@ public class Simulation internal constructor(
                 null,
                 p.votedFor,
                 memberSet,
-                s.storage.entries(1, s.storage.lastIndex() + 1),
+                retainedLog(s.storage, snap?.meta?.lastIndex ?: 0L),
                 0,
                 0,
                 s.incarnation,
+                snap,
             )
         }
+    }
+
+    private fun currentSnapshot(s: NodeSlot): Snapshot? {
+        val host = s.host
+        if (host != null && (s.snapshotCache?.meta?.lastIndex ?: 0L) != host.snapshotIndex) {
+            s.snapshotCache = if (host.snapshotIndex == 0L) null else s.storage.loadSnapshot()
+        }
+        return s.snapshotCache
+    }
+
+    private fun retainedLog(
+        storage: RaftStorage,
+        base: Long,
+    ): List<LogEntry> {
+        val last = storage.lastIndex()
+        return if (last <= base) emptyList() else storage.entries(base + 1, last + 1)
     }
 
     private fun afterControl() {

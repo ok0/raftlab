@@ -1,6 +1,10 @@
 package io.raftlab.core
 
-/** Tunable timing for a [RaftNode], in ticks, plus test-only [Mutation]s. */
+/**
+ * Tunable timing for a [RaftNode], in ticks, plus test-only [Mutation]s and the snapshot threshold.
+ *
+ * A node takes a snapshot once more than [snapshotThreshold] applied entries lie after its last snapshot.
+ */
 public data class RaftConfig(
     /** Inclusive range the election timeout is drawn from on every timer reset. */
     public val electionTimeoutTicks: IntRange = 10..20,
@@ -10,6 +14,8 @@ public data class RaftConfig(
     public val maxEntriesPerAppend: Int = 64,
     /** Deliberately injected safety bugs, for tests and fuzzing only; empty by default. */
     public val mutations: Set<Mutation> = emptySet(),
+    /** Snapshot is taken once `lastApplied - snapshotIndex` exceeds this; must be at least 1. */
+    public val snapshotThreshold: Int = DEFAULT_SNAPSHOT_THRESHOLD,
 ) {
     init {
         require(!electionTimeoutTicks.isEmpty()) { "electionTimeoutTicks must not be empty: $electionTimeoutTicks" }
@@ -19,5 +25,12 @@ public data class RaftConfig(
         require(heartbeatTicks < electionTimeoutTicks.first) {
             "heartbeatTicks $heartbeatTicks must be below the minimum election timeout ${electionTimeoutTicks.first}"
         }
+        require(snapshotThreshold >= 1) { "snapshotThreshold must be at least 1: $snapshotThreshold" }
+    }
+
+    /** Default values of [RaftConfig]. */
+    public companion object {
+        /** Default [snapshotThreshold]: 1000 applied entries. */
+        public const val DEFAULT_SNAPSHOT_THRESHOLD: Int = 1000
     }
 }

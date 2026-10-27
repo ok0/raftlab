@@ -8,12 +8,15 @@ import io.raftlab.trace.LogTruncated
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
+import io.raftlab.trace.SnapshotInstalled
+import io.raftlab.trace.SnapshotTaken
 import io.raftlab.trace.TraceSink
 import io.raftlab.trace.VoteCast
 import java.util.TreeMap
 
 /**
- * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit and apply.
+ * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit, apply, snapshots
+ * and InstallSnapshot.
  *
  * All behavior is driven by [step]. The node performs no I/O, reads no clock and starts no threads, so the same
  * inputs always produce the same effects.
@@ -30,8 +33,12 @@ public class RaftNode(
     private val random: RandomSource,
     private val trace: TraceSink,
 ) {
-    /** Cluster membership, sorted by id. */
-    public val members: Set<NodeId> = initialMembers.sorted().toSet()
+    /**
+     * Cluster membership, sorted by id. On start with a snapshot it is taken from the last config entry of the
+     * retained log, else from the snapshot metadata; an installed snapshot replaces it.
+     */
+    public var members: Set<NodeId> = initialMembers.sorted().toSet()
+        private set
 
     /** Current role of this node. */
     public var role: Role = Role.FOLLOWER
@@ -45,20 +52,33 @@ public class RaftNode(
     public var leaderHint: NodeId? = null
         private set
 
-    /** Highest index known to be committed; starts at 0 on every start and never decreases while running. */
+    /**
+     * Highest index known to be committed; starts at the snapshot index (0 without a snapshot) on every start and
+     * never decreases while running.
+     */
     public var commitIndex: Long = 0
         private set
 
-    /** Highest index applied to the state machine; never exceeds [commitIndex]. */
+    /**
+     * Highest index applied to the state machine; starts at the snapshot index (0 without a snapshot) on every start
+     * and never decreases while running. Never exceeds [commitIndex].
+     */
     public var lastApplied: Long = 0
         private set
 
+    /** Last index covered by this node's snapshot, or 0 without one; the retained log starts at `snapshotIndex + 1`. */
+    public var snapshotIndex: Long = 0
+        private set
+
     private var votedFor: NodeId? = null
-    private val peers: List<NodeId> = members.filter { it != id }
+    private var peers: List<NodeId> = members.filter { it != id }
     private val votesGranted: MutableSet<NodeId> = mutableSetOf()
     private val nextIndex: MutableMap<NodeId, Long> = TreeMap()
     private val matchIndex: MutableMap<NodeId, Long> = TreeMap()
     private val pending: TreeMap<Long, Long> = TreeMap()
+    private var snapshotTerm: Long = 0
+    private var ticks: Long = 0
+    private val snapshotSentAt: MutableMap<NodeId, Long> = TreeMap()
     private var electionElapsed: Int = 0
     private var electionTimeout: Int = 0
     private var heartbeatElapsed: Int = 0
@@ -68,6 +88,18 @@ public class RaftNode(
         val s = storage.loadState()
         currentTerm = s.term
         votedFor = s.votedFor
+        val snap = storage.loadSnapshot()
+        if (snap != null) {
+            storage.compactTo(snap.meta.lastIndex)
+            stateMachine.restore(snap.data)
+            snapshotIndex = snap.meta.lastIndex
+            snapshotTerm = snap.meta.lastTerm
+            commitIndex = snapshotIndex
+            lastApplied = snapshotIndex
+            val lastConfig =
+                logSnapshotForChecks().lastOrNull { it.payload is EntryPayload.Config }?.payload as EntryPayload.Config?
+            adoptMembers(lastConfig?.members ?: snap.meta.members)
+        }
         resetElectionTimer()
     }
 
@@ -85,12 +117,22 @@ public class RaftNode(
         return out
     }
 
-    /** Returns a copy of the whole log, for invariant checks and tests. */
-    public fun logSnapshotForChecks(): List<LogEntry> = storage.entries(1, storage.lastIndex() + 1)
+    /**
+     * Returns a copy of the retained log (`snapshotIndex + 1` through the last index), for invariant checks and tests.
+     */
+    public fun logSnapshotForChecks(): List<LogEntry> {
+        val last = storage.lastIndex()
+        return if (last <= snapshotIndex) emptyList() else storage.entries(snapshotIndex + 1, last + 1)
+    }
 
     internal fun nextIndexOf(peer: NodeId): Long? = if (role == Role.LEADER) nextIndex[peer] else null
 
     internal fun matchIndexOf(peer: NodeId): Long? = if (role == Role.LEADER) matchIndex[peer] else null
+
+    private fun adoptMembers(set: Set<NodeId>) {
+        members = set.sorted().toSet()
+        peers = members.filter { it != id }
+    }
 
     private fun resetElectionTimer() {
         electionElapsed = 0
@@ -162,8 +204,9 @@ public class RaftNode(
 
     private fun firstIndexOfTermAt(index: Long): Long {
         val t = termAt(index)
+        val floor = maxOf(1L, snapshotIndex)
         var i = index
-        while (i > 1 && termAt(i - 1) == t) {
+        while (i > floor && termAt(i - 1) == t) {
             i--
         }
         return i
@@ -171,7 +214,8 @@ public class RaftNode(
 
     private fun lastIndexOfTerm(term: Long): Long? {
         var i = lastLogIndex()
-        while (i >= 1) {
+        val floor = maxOf(1L, snapshotIndex)
+        while (i >= floor) {
             val t = termAt(i)
             if (t == term) return i
             if (t < term) return null
@@ -181,6 +225,7 @@ public class RaftNode(
     }
 
     private fun onTick(out: MutableList<Effect>) {
+        ticks++
         if (role == Role.LEADER) {
             heartbeatElapsed++
             if (heartbeatElapsed >= config.heartbeatTicks) {
@@ -228,6 +273,7 @@ public class RaftNode(
         heartbeatElapsed = 0
         electionElapsed = 0
         pending.clear()
+        snapshotSentAt.clear()
         val next = lastLogIndex() + 1
         for (peer in peers) {
             nextIndex[peer] = next
@@ -250,6 +296,10 @@ public class RaftNode(
     ) {
         val last = lastLogIndex()
         val next = nextIndex.getValue(peer).coerceIn(1L, last + 1)
+        if (next <= snapshotIndex) {
+            sendInstallSnapshot(peer, out)
+            return
+        }
         val toExclusive = minOf(last + 1, next + config.maxEntriesPerAppend)
         out.add(
             Effect.Send(
@@ -262,6 +312,29 @@ public class RaftNode(
                     storage.entries(next, toExclusive),
                     commitIndex,
                     0,
+                ),
+            ),
+        )
+    }
+
+    private fun sendInstallSnapshot(
+        peer: NodeId,
+        out: MutableList<Effect>,
+    ) {
+        val sentAt = snapshotSentAt[peer]
+        if (sentAt != null && ticks - sentAt < config.heartbeatTicks) return
+        val snap = checkNotNull(storage.loadSnapshot()) { "no snapshot for index $snapshotIndex" }
+        snapshotSentAt[peer] = ticks
+        out.add(
+            Effect.Send(
+                InstallSnapshot(
+                    currentTerm,
+                    id,
+                    peer,
+                    snap.meta.lastIndex,
+                    snap.meta.lastTerm,
+                    snap.meta.members,
+                    snap.data,
                 ),
             ),
         )
@@ -289,6 +362,14 @@ public class RaftNode(
                 ),
             ),
         )
+    }
+
+    private fun replyInstall(
+        msg: InstallSnapshot,
+        lastIndex: Long,
+        out: MutableList<Effect>,
+    ) {
+        out.add(Effect.Send(InstallSnapshotResponse(currentTerm, id, msg.from, lastIndex)))
     }
 
     // Raft §5.4.2 (Figure 8): only current-term entries commit by counting replicas. With
@@ -335,6 +416,19 @@ public class RaftNode(
                 }
             }
         }
+        maybeTakeSnapshot()
+    }
+
+    private fun maybeTakeSnapshot() {
+        if (lastApplied - snapshotIndex <= config.snapshotThreshold) return
+        val index = lastApplied
+        val term = termAt(index)
+        storage.saveSnapshot(SnapshotMeta(index, term, members), stateMachine.snapshot())
+        storage.compactTo(index)
+        snapshotIndex = index
+        snapshotTerm = term
+        val node = id
+        trace.emit { seq, time -> SnapshotTaken(seq, time, node, index, term) }
     }
 
     private fun abandonPending(out: MutableList<Effect>) {
@@ -398,6 +492,10 @@ public class RaftNode(
                     )
                 }
 
+                is InstallSnapshot -> {
+                    out.add(Effect.Send(InstallSnapshotResponse(currentTerm, id, msg.from, 0)))
+                }
+
                 else -> {}
             }
             return
@@ -407,6 +505,8 @@ public class RaftNode(
             is RequestVoteResponse -> handleVoteResponse(msg, out)
             is AppendEntries -> handleAppendEntries(msg, out)
             is AppendEntriesResponse -> handleAppendEntriesResponse(msg, out)
+            is InstallSnapshot -> handleInstallSnapshot(msg, out)
+            is InstallSnapshotResponse -> handleInstallSnapshotResponse(msg, out)
             else -> Unit
         }
     }
@@ -455,12 +555,16 @@ public class RaftNode(
             replyAppend(msg, false, 0, lastLogIndex() + 1, 0, out)
             return
         }
-        val localTerm = termAt(prev)
-        if (localTerm != msg.prevLogTerm) {
-            replyAppend(msg, false, 0, firstIndexOfTermAt(prev), localTerm, out)
-            return
+        var entries = msg.entries
+        if (prev < snapshotIndex) {
+            entries = entries.filter { it.index > snapshotIndex }
+        } else {
+            val localTerm = termAt(prev)
+            if (localTerm != msg.prevLogTerm) {
+                replyAppend(msg, false, 0, firstIndexOfTermAt(prev), localTerm, out)
+                return
+            }
         }
-        val entries = msg.entries
         var k = 0
         while (k < entries.size) {
             val e = entries[k]
@@ -472,7 +576,7 @@ public class RaftNode(
             k++
         }
         appendToLog(entries.drop(k))
-        val lastNew = prev + entries.size
+        val lastNew = maxOf(prev + msg.entries.size, snapshotIndex)
         if (msg.leaderCommit > commitIndex) advanceCommitTo(minOf(msg.leaderCommit, lastNew), out)
         replyAppend(msg, true, lastNew, 0, 0, out)
     }
@@ -504,6 +608,55 @@ public class RaftNode(
             nextIndex[peer] = maxOf(target, match + 1, 1L)
             sendAppendEntries(peer, out)
         }
+    }
+
+    private fun handleInstallSnapshot(
+        msg: InstallSnapshot,
+        out: MutableList<Effect>,
+    ) {
+        if (role == Role.LEADER) return
+        if (role == Role.CANDIDATE) {
+            emitRoleChanged(Role.CANDIDATE, Role.FOLLOWER, REASON_LEADER)
+            role = Role.FOLLOWER
+        }
+        leaderHint = msg.from
+        resetElectionTimer()
+        if (msg.lastIndex <= commitIndex) {
+            replyInstall(msg, commitIndex, out)
+            return
+        }
+        val keep = msg.lastIndex <= lastLogIndex() && termAt(msg.lastIndex) == msg.lastTerm
+        storage.saveSnapshot(SnapshotMeta(msg.lastIndex, msg.lastTerm, msg.members), msg.data)
+        if (!keep && lastLogIndex() > snapshotIndex) truncateLog(snapshotIndex + 1)
+        storage.compactTo(msg.lastIndex)
+        stateMachine.restore(msg.data.copyOf())
+        snapshotIndex = msg.lastIndex
+        snapshotTerm = msg.lastTerm
+        commitIndex = msg.lastIndex
+        lastApplied = msg.lastIndex
+        adoptMembers(msg.members)
+        val node = id
+        val li = msg.lastIndex
+        val lt = msg.lastTerm
+        trace.emit { seq, time -> SnapshotInstalled(seq, time, node, li, lt) }
+        abandonPending(out)
+        replyInstall(msg, msg.lastIndex, out)
+    }
+
+    private fun handleInstallSnapshotResponse(
+        msg: InstallSnapshotResponse,
+        out: MutableList<Effect>,
+    ) {
+        if (role != Role.LEADER) return
+        val peer = msg.from
+        val match = matchIndex[peer] ?: return
+        val newMatch = minOf(msg.lastIndex, lastLogIndex())
+        if (newMatch <= match) return
+        snapshotSentAt.remove(peer)
+        matchIndex[peer] = newMatch
+        nextIndex[peer] = newMatch + 1
+        advanceLeaderCommit(out)
+        if (nextIndex.getValue(peer) <= lastLogIndex()) sendAppendEntries(peer, out)
     }
 
     private companion object {

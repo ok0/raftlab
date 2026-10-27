@@ -1,6 +1,7 @@
 package io.raftlab.sim
 
 import io.raftlab.core.LogEntry
+import io.raftlab.core.Snapshot
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.Role
 import java.util.TreeMap
@@ -16,10 +17,11 @@ import java.util.TreeSet
  * @property leaderHint Believed leader; `null` when the node is crashed.
  * @property votedFor Persisted vote for the current term, if any.
  * @property members Cluster membership known to the node.
- * @property log Live log; persisted log when crashed.
+ * @property log Retained log entries from `snapshotIndex + 1`; persisted retained log when crashed.
  * @property commitIndex Commit index; `0` when crashed.
  * @property lastApplied Last applied index; `0` when crashed.
  * @property incarnation Number of crashes so far; a change while up means the node restarted with fresh volatile state.
+ * @property snapshot Snapshot held by the node (persisted snapshot when crashed), or null.
  */
 public data class NodeState(
     /** Node identifier. */
@@ -36,7 +38,7 @@ public data class NodeState(
     public val votedFor: NodeId?,
     /** Cluster membership known to the node. */
     public val members: Set<NodeId>,
-    /** Live log; persisted log when crashed. */
+    /** Retained log entries from `snapshotIndex + 1`; persisted retained log when crashed. */
     public val log: List<LogEntry> = emptyList(),
     /** Commit index; `0` when crashed. */
     public val commitIndex: Long = 0,
@@ -44,7 +46,21 @@ public data class NodeState(
     public val lastApplied: Long = 0,
     /** Number of crashes so far; a change while up means the node restarted with fresh volatile state. */
     public val incarnation: Int = 0,
-)
+    /** Snapshot held by the node (persisted snapshot when crashed), or null. */
+    public val snapshot: Snapshot? = null,
+) {
+    /** Last index covered by the snapshot, or `0` without one. */
+    public val snapshotIndex: Long
+        get() = snapshot?.meta?.lastIndex ?: 0L
+
+    /** Last log index: of the last retained entry, or [snapshotIndex] when the retained log is empty. */
+    public val lastIndex: Long
+        get() = snapshotIndex + log.size
+
+    /** Returns the retained entry at [index], or null when [index] is covered by the snapshot or beyond the log. */
+    public fun entryAt(index: Long): LogEntry? =
+        if (index <= snapshotIndex) null else log.getOrNull((index - snapshotIndex - 1).toInt())
+}
 
 /**
  * A safety violation detected during a simulation run.
@@ -165,6 +181,8 @@ public class InvariantChecker(
         /**
          * Returns a checker with the standard invariants: election safety, log matching, leader completeness,
          * state machine safety and commit monotonicity.
+         *
+         * State machine safety also checks snapshots against applied entries and against each other.
          */
         public fun standard(): InvariantChecker =
             InvariantChecker(

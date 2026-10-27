@@ -11,6 +11,8 @@ import java.util.TreeSet
  *
  * The term recorded for a committed entry is the term of the observing node at the time it was seen committed.
  * It is an upper bound of the real commit term, so a leader is never wrongly accused. Records survive crashes.
+ * Entries covered by a node's snapshot are not recorded from that node, and a leader whose snapshot covers an
+ * index is not checked there; snapshot terms are checked by [StateMachineSafety].
  */
 public class LeaderCompleteness : Invariant {
     /** Stable name of this invariant. */
@@ -37,10 +39,10 @@ public class LeaderCompleteness : Invariant {
                 seenIncarnation[id] = node.incarnation
                 seenCommit[id] = 0
             }
-            val upTo = minOf(node.commitIndex, node.log.size.toLong())
-            for (idx in (seenCommit.getValue(id) + 1)..upTo) {
+            val upTo = minOf(node.commitIndex, node.lastIndex)
+            for (idx in (maxOf(seenCommit.getValue(id), node.snapshotIndex) + 1)..upTo) {
                 if (idx !in committed) {
-                    committed[idx] = node.log[(idx - 1).toInt()]
+                    committed[idx] = checkNotNull(node.entryAt(idx))
                     committedInTerm[idx] = node.currentTerm
                 }
             }
@@ -50,7 +52,8 @@ public class LeaderCompleteness : Invariant {
             if (!node.up || node.role != Role.LEADER) continue
             for ((idx, entry) in committed) {
                 if (node.currentTerm <= committedInTerm.getValue(idx)) continue
-                val held = node.log.getOrNull((idx - 1).toInt())
+                if (idx <= node.snapshotIndex) continue
+                val held = node.entryAt(idx)
                 if (held != entry && reported.add("${node.id.value}|${node.currentTerm}|$idx")) {
                     out.add(
                         "leader ${node.id.value} (term ${node.currentTerm}) does not hold committed " +

@@ -20,18 +20,20 @@ fun kvNode(
     members: Set<NodeId>,
     machine: KvStateMachine,
     seed: Long = 1,
-): RaftNode = RaftNode(id, members, RaftConfig(), InMemoryStorage(), machine, SplitMix64(seed), TraceSink { })
+    config: RaftConfig = RaftConfig(),
+): RaftNode = RaftNode(id, members, config, InMemoryStorage(), machine, SplitMix64(seed), TraceSink { })
 
 fun List<KvServerOutput>.replies(): List<ClientResponse> = filterIsInstance<KvServerOutput.Reply>().map { it.response }
 
 class KvCluster(
     seed: Long = 7,
+    config: RaftConfig = RaftConfig(),
 ) {
     private val ids = listOf(n1, n2, n3)
     val machines: Map<NodeId, KvStateMachine> = ids.associateWith { KvStateMachine() }
     val nodes: Map<NodeId, RaftNode> =
         ids.withIndex().associate { (i, id) ->
-            id to kvNode(id, ids.toSet(), machines.getValue(id), seed * 31 + i)
+            id to kvNode(id, ids.toSet(), machines.getValue(id), seed * 31 + i, config)
         }
     val servers: Map<NodeId, KvServer> = nodes.mapValues { KvServer(it.value) }
     val isolated: MutableSet<NodeId> = mutableSetOf()

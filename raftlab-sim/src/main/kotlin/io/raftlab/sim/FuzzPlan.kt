@@ -1,5 +1,6 @@
 package io.raftlab.sim
 
+import io.raftlab.core.RaftConfig
 import io.raftlab.core.SplitMix64
 import io.raftlab.trace.NodeId
 
@@ -19,6 +20,7 @@ import io.raftlab.trace.NodeId
  * @property clientFaults Client-link faults of the run.
  * @property partitions Partition windows, in time order.
  * @property crashes Crash windows, lane by lane and in time order within each lane.
+ * @property snapshotThreshold Snapshot threshold of every node; low values make snapshots and installs frequent.
  */
 internal data class FuzzPlan(
     val nodes: Int,
@@ -31,6 +33,7 @@ internal data class FuzzPlan(
     val clientFaults: ClientLinkFaults,
     val partitions: List<PartitionWindow>,
     val crashes: List<CrashWindow>,
+    val snapshotThreshold: Int,
 ) {
     /** Largest number of nodes that may be down at the same time without losing a majority. */
     val maxDown: Int get() = (nodes - 1) / 2
@@ -67,6 +70,7 @@ internal data class FuzzPlan(
         private val CLIENT_DROP_RATES = listOf(20, 50, 100)
         private val CLIENT_DUPLICATE_RATES = listOf(0, 20, 50)
         private val CLIENT_EXTRA_DELAYS = listOf(0L, 10L, 40L)
+        private val SNAPSHOT_THRESHOLDS = listOf(2, 4, 8, 16, 32, RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD)
 
         /** Draws the plan of the run with [seed]. */
         fun draw(seed: Long): FuzzPlan {
@@ -125,6 +129,8 @@ internal data class FuzzPlan(
                 }
             }
 
+            val snapshotThreshold = SNAPSHOT_THRESHOLDS[r.nextLong(SNAPSHOT_THRESHOLDS.size.toLong()).toInt()]
+
             return FuzzPlan(
                 nodes = nodes,
                 faults = faults,
@@ -136,6 +142,7 @@ internal data class FuzzPlan(
                 clientFaults = clientFaults,
                 partitions = partitions,
                 crashes = crashes,
+                snapshotThreshold = snapshotThreshold,
             )
         }
 
