@@ -10,26 +10,31 @@ flowchart TB
         n1["raftlab-viz"]
     end
     subgraph g1["Layer 3"]
-        n2["raftlab-sim"]
-        n3["raftlab-storage-file"]
+        n2["raftlab-net"]
+        n3["raftlab-sim"]
+        n4["raftlab-storage-file"]
     end
     subgraph g2["Layer 4"]
-        n4["raftlab-kv"]
+        n5["raftlab-kv"]
     end
     subgraph g3["Layer 5"]
-        n5["raftlab-core"]
+        n6["raftlab-core"]
     end
     subgraph g4["Layer 6"]
-        n6["raftlab-trace"]
+        n7["raftlab-trace"]
     end
-    n5 --> n6
-    n0 --> n2
+    n6 --> n7
+    n0 --> n3
     n0 --> n1
-    n4 --> n5
-    n4 --> n6
+    n5 --> n6
+    n5 --> n7
+    n2 --> n6
     n2 --> n5
     n2 --> n4
-    n2 --> n6
+    n2 --> n7
+    n3 --> n6
     n3 --> n5
-    n1 --> n6
+    n3 --> n7
+    n4 --> n6
+    n1 --> n7
 ```

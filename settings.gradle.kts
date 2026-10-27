@@ -14,6 +14,7 @@ include(
     ":raftlab-core",
     ":raftlab-kv",
     ":raftlab-storage-file",
+    ":raftlab-net",
     ":raftlab-sim",
     ":raftlab-viz",
     ":raftlab-docs",
