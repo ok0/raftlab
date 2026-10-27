@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>raftlab trace viewer</title>
+<style>
+body { font-family: monospace; margin: 1em; }
+#controls { margin-bottom: 1em; }
+#detail { white-space: pre-wrap; border: 1px solid #ccc; padding: 4px; min-height: 3em; }
+#events { list-style: none; padding: 0; max-height: 60vh; overflow-y: auto; border: 1px solid #ccc; }
+#events li { padding: 2px 4px; cursor: pointer; }
+#events li.current { background: #ffe08a; }
+</style>
+</head>
+<body>
+<h1>raftlab trace viewer</h1>
+<div id="controls">
+<button id="prev" type="button">Prev</button>
+<button id="next" type="button">Next</button>
+<button id="play" type="button">Play</button>
+<span id="position">0 / 0</span>
+</div>
+<p id="empty" hidden>no events</p>
+<pre id="detail"></pre>
+<ol id="events"></ol>
+<script type="application/x-ndjson" id="trace-data">
+{"type":"NodeStarted","seq":0,"time":0,"node":"n1"}
+{"type":"Marker","seq":1,"time":10,"node":null,"label":"a\u003cb \u0026 c\u003ed"}
+{"type":"RoleChanged","seq":2,"time":150,"node":"n1","from":"FOLLOWER","to":"CANDIDATE","term":1,"reason":"election timeout"}
+</script>
+<script>
+(function () {
+  'use strict';
+  var PLAY_INTERVAL_MS = 500;
+  var raw = document.getElementById('trace-data').textContent;
+  var events = [];
+  raw.split('\n').forEach(function (line) {
+    if (line.trim() !== '') {
+      events.push(JSON.parse(line));
+    }
+  });
+  var list = document.getElementById('events');
+  var detail = document.getElementById('detail');
+  var position = document.getElementById('position');
+  var prevButton = document.getElementById('prev');
+  var nextButton = document.getElementById('next');
+  var playButton = document.getElementById('play');
+  var items = [];
+  var current = 0;
+  var timer = null;
+
+  function summary(e) {
+    return 't=' + e.time + ' ' + (e.node === null ? '-' : e.node) + ' ' + e.type;
+  }
+
+  function details(e) {
+    var rest = {};
+    Object.keys(e).forEach(function (k) {
+      if (k !== 'type' && k !== 'seq' && k !== 'time' && k !== 'node') {
+        rest[k] = e[k];
+      }
+    });
+    return JSON.stringify(rest, null, 2);
+  }
+
+  function show(i) {
+    items[current].className = '';
+    current = i;
+    items[current].className = 'current';
+    items[current].scrollIntoView({ block: 'nearest' });
+    position.textContent = (current + 1) + ' / ' + events.length;
+    detail.textContent = summary(events[current]) + '\n' + details(events[current]);
+  }
+
+  function stop() {
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+    playButton.textContent = 'Play';
+  }
+
+  function tick() {
+    if (current < events.length - 1) {
+      show(current + 1);
+    } else {
+      stop();
+    }
+  }
+
+  if (events.length === 0) {
+    document.getElementById('empty').hidden = false;
+    prevButton.disabled = true;
+    nextButton.disabled = true;
+    playButton.disabled = true;
+    return;
+  }
+
+  events.forEach(function (e, i) {
+    var li = document.createElement('li');
+    li.textContent = '#' + e.seq + ' ' + summary(e);
+    li.addEventListener('click', function () {
+      stop();
+      show(i);
+    });
+    list.appendChild(li);
+    items.push(li);
+  });
+
+  prevButton.addEventListener('click', function () {
+    if (current > 0) {
+      show(current - 1);
+    }
+  });
+  nextButton.addEventListener('click', function () {
+    if (current < events.length - 1) {
+      show(current + 1);
+    }
+  });
+  playButton.addEventListener('click', function () {
+    if (timer !== null) {
+      stop();
+      return;
+    }
+    timer = setInterval(tick, PLAY_INTERVAL_MS);
+    playButton.textContent = 'Pause';
+  });
+
+  show(0);
+}());
+</script>
+</body>
+</html>

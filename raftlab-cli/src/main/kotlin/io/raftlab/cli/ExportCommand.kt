@@ -12,6 +12,7 @@ import com.github.ajalt.clikt.parameters.types.restrictTo
 import io.raftlab.sim.ScenarioLibrary
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.TraceCodec
+import io.raftlab.viz.HtmlViewer
 import io.raftlab.viz.LogTableExporter
 import io.raftlab.viz.SequenceDiagramExporter
 import io.raftlab.viz.StateDiagramExporter
@@ -22,33 +23,34 @@ internal class ExportCommand(
     private val env: CliEnvironment,
 ) : CoreCliktCommand(name = "export") {
     override fun help(context: Context): String =
-        "Render Mermaid diagrams (state, sequence) or log tables (logtable) from a trace file or a scenario run."
+        "Render Mermaid diagrams (state, sequence), log tables (logtable) or a self-contained " +
+            "HTML trace viewer (html) from a trace file or a scenario run."
 
     private val trace by option("--trace", help = "Trace file (JSON lines) to render.")
         .path(mustExist = true, canBeDir = false, mustBeReadable = true)
     private val scenario by option("--scenario", help = "Scenario name to run and render.")
         .choice(*ScenarioLibrary.all.keys.toTypedArray())
     private val seed by option("--seed", help = "Seed for --scenario (default 42).").long()
-    private val format by option("--format", help = "state, sequence or logtable.")
-        .choice("state", "sequence", "logtable")
+    private val format by option("--format", help = "state, sequence, logtable or html.")
+        .choice("state", "sequence", "logtable", "html")
         .required()
     private val from by option(
         "--from",
-        help = "Only events at or after this time (ms). state and sequence filter events; logtable limits time points.",
+        help = "Only events at or after this time (ms); filters events (logtable: limits time points).",
     ).long().restrictTo(min = 0L)
     private val to by option(
         "--to",
-        help = "Only events at or before this time (ms). state, sequence filter events; logtable limits time points.",
+        help = "Only events at or before this time (ms); filters events (logtable: limits time points).",
     ).long().restrictTo(min = 0L)
     private val nodes by option(
         "--nodes",
-        help = "Comma-separated node ids. state and sequence show only these nodes; logtable keeps only their events.",
+        help = "Comma-separated node ids: state/sequence show only these nodes; logtable/html keep their events.",
     ).split(",")
     private val at by option(
         "--at",
         help = "logtable only: comma-separated time points in ms (default: --to or the end of the trace).",
     ).long().split(",")
-    private val out by option("--out", help = "Write the diagram to this file instead of stdout.")
+    private val out by option("--out", help = "Write the output to this file instead of stdout.")
         .path(canBeDir = false)
 
     override fun run() {
@@ -108,6 +110,15 @@ internal class ExportCommand(
 
                 "sequence" -> {
                     SequenceDiagramExporter().export(events, window = window, nodes = nodeSet)
+                }
+
+                "html" -> {
+                    HtmlViewer.render(
+                        events.filter { e ->
+                            val node = e.node
+                            (window == null || e.time in window) && (nodeSet == null || node == null || node in nodeSet)
+                        },
+                    )
                 }
 
                 else -> {

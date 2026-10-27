@@ -4,6 +4,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.raftlab.sim.ScenarioLibrary
 import io.raftlab.trace.TraceCodec
+import io.raftlab.viz.HtmlViewer
 import io.raftlab.viz.LogTableExporter
 import io.raftlab.viz.MermaidLint
 import io.raftlab.viz.SequenceDiagramExporter
@@ -38,6 +39,11 @@ internal class ExportCommandTest {
         val lines = result.stderr.trimEnd().lines()
         lines.size shouldBe 1
         lines.single().startsWith("error:") shouldBe true
+    }
+
+    private fun embeddedCount(html: String): Int {
+        val marker = "<script type=\"application/x-ndjson\" id=\"trace-data\">\n"
+        return TraceCodec.decode(html.substringAfter(marker).substringBefore("</script>")).size
     }
 
     @Test
@@ -127,11 +133,12 @@ internal class ExportCommandTest {
 
     @Test
     fun usageErrors() {
-        val formatError = scenarioExport("--format", "html")
+        val formatError = scenarioExport("--format", "svg")
         formatError.exitCode shouldBe 2
         formatError.stderr shouldContain "state"
         formatError.stderr shouldContain "sequence"
         formatError.stderr shouldContain "logtable"
+        formatError.stderr shouldContain "html"
         assertOneErrorLine(formatError)
 
         val traceFile = tmp.resolve("trace.jsonl")
@@ -162,5 +169,48 @@ internal class ExportCommandTest {
         val malformedResult = CliTest.run("export", "--trace", malformed.toString(), "--format", "sequence")
         malformedResult.exitCode shouldBe 2
         assertOneErrorLine(malformedResult)
+
+        val atWithHtml = scenarioExport("--format", "html", "--at", "1")
+        atWithHtml.exitCode shouldBe 2
+        assertOneErrorLine(atWithHtml)
+    }
+
+    @Test
+    fun htmlEqualsViewer() {
+        val result = scenarioExport("--format", "html")
+        result.exitCode shouldBe 0
+        result.stdout shouldBe HtmlViewer.render(trace)
+    }
+
+    @Test
+    fun htmlTraceFileMatchesScenario() {
+        val traceFile = tmp.resolve("trace.jsonl")
+        Files.writeString(traceFile, TraceCodec.encode(trace))
+        val fromFile = CliTest.run("export", "--trace", traceFile.toString(), "--format", "html")
+        fromFile.exitCode shouldBe 0
+        fromFile.stdout shouldBe scenarioExport("--format", "html").stdout
+    }
+
+    @Test
+    fun htmlOutFileWritesAndPrintsNothing() {
+        val outFile = tmp.resolve("viewer.html")
+        val result = scenarioExport("--format", "html", "--out", outFile.toString())
+        result.exitCode shouldBe 0
+        result.stdout shouldBe ""
+        Files.readString(outFile) shouldBe HtmlViewer.render(trace)
+    }
+
+    @Test
+    fun htmlFiltersReduceEmbeddedEvents() {
+        val first = two.first()
+        val nodesResult = scenarioExport("--format", "html", "--nodes", first.value)
+        nodesResult.exitCode shouldBe 0
+        nodesResult.stdout shouldBe HtmlViewer.render(trace.filter { it.node == null || it.node == first })
+        (embeddedCount(nodesResult.stdout) < trace.size) shouldBe true
+
+        val windowResult = scenarioExport("--format", "html", "--from", "0", "--to", "${end / 2}")
+        windowResult.exitCode shouldBe 0
+        windowResult.stdout shouldBe HtmlViewer.render(trace.filter { it.time in 0L..end / 2 })
+        (embeddedCount(windowResult.stdout) < trace.size) shouldBe true
     }
 }
