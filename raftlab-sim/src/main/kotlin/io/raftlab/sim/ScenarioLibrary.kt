@@ -25,9 +25,10 @@ public object ScenarioLibrary {
             RestartAllScenario.scenario,
             LaggingFollowerSnapshotScenario.scenario,
             MembershipAddRemoveScenario.scenario,
+            LeadershipTransferScenario.scenario,
         ).associateBy { it.name }
 
     init {
-        require(all.size == 9) { "duplicate scenario name" }
+        require(all.size == 10) { "duplicate scenario name" }
     }
 }

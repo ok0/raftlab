@@ -2,6 +2,7 @@ package io.raftlab.sim
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.raftlab.core.RaftConfig
 import io.raftlab.trace.DropReason
 import io.raftlab.trace.MessageDelivered
 import io.raftlab.trace.MessageDropped
@@ -53,6 +54,21 @@ class NodeControlTest {
     @Test
     fun isolatedMinorityNeverLeads() {
         val sim = Simulation(22)
+        sim.partition(setOf(n1))
+        sim.runUntil(3000)
+
+        val roles = sim.trace.filterIsInstance<RoleChanged>()
+        roles.any { it.node == n1 && it.to == Role.LEADER } shouldBe false
+        sim.node(n1).currentTerm shouldBe 0L
+        sim.node(n1).role shouldBe Role.PRE_CANDIDATE
+        val others = sim.nodes().filter { it.id != n1 }
+        others.any { it.role == Role.LEADER } shouldBe true
+        sim.violations.isEmpty() shouldBe true
+    }
+
+    @Test
+    fun isolatedMinorityRaisesItsTermWithoutPreVote() {
+        val sim = Simulation(22, SimOptions(raftConfig = RaftConfig(preVote = false)))
         sim.partition(setOf(n1))
         sim.runUntil(3000)
 

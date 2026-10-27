@@ -15,7 +15,7 @@ internal class RaftNodeInstallSnapshotTest {
             node(
                 storage = compactedStorage(5, 1, 1, 2, 2, 2, 3, 3, currentTerm = 3, data = "d".encodeToByteArray()),
             )
-        l.tick(10)
+        l.campaign()
         l.receive(rvr(4, n2))
         return l
     }
@@ -157,7 +157,7 @@ internal class RaftNodeInstallSnapshotTest {
     fun candidateSameTermBecomesFollower() {
         val rec = recorder()
         val c = node(storage = InMemoryStorage(), trace = rec)
-        c.tick(10)
+        c.campaign()
         c.role shouldBe Role.CANDIDATE
         c.receive(isnap(1, n2, lastIndex = 5, lastTerm = 2)) shouldBe listOf(Effect.Send(isr(1, n1, n2, 5)))
         val change = rec.events.filterIsInstance<RoleChanged>().last()

@@ -15,7 +15,7 @@ class ScenarioLibraryTest {
     }
 
     @Test
-    fun libraryHasNineInOrder() {
+    fun libraryHasTenInOrder() {
         ScenarioLibrary.all.keys.toList() shouldBe
             listOf(
                 "normal-election",
@@ -27,6 +27,7 @@ class ScenarioLibraryTest {
                 "restart-all",
                 "lagging-follower-snapshot",
                 "membership-add-remove",
+                "leadership-transfer",
             )
         ScenarioLibrary.all.forEach { (key, scenario) -> scenario.name shouldBe key }
     }

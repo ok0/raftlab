@@ -18,6 +18,7 @@ internal class ScenarioRun(
     checker: InvariantChecker,
     mutations: Set<Mutation>,
     requestHook: ClientRequestHook? = null,
+    preVoteOverride: Boolean? = null,
 ) : SimulationView {
     private val active: Set<Mutation> = mutations.toSortedSet()
 
@@ -38,7 +39,12 @@ internal class ScenarioRun(
             SimOptions(
                 nodeCount = spec.nodes,
                 faults = faults ?: spec.faults,
-                raftConfig = RaftConfig(mutations = active, snapshotThreshold = spec.snapshotThreshold),
+                raftConfig =
+                    RaftConfig(
+                        mutations = active,
+                        snapshotThreshold = spec.snapshotThreshold,
+                        preVote = preVoteOverride ?: spec.preVote,
+                    ),
             ),
             checker,
             NodeFactory.RAFT,
@@ -116,6 +122,10 @@ internal class ScenarioRun(
             sim.partition(group, nodeIds.filter { it !in group }.toSet())
             group
         }
+
+    override fun transferLeadership(target: NodeId) {
+        act("transferLeadership(${target.value})") { sim.transferLeadership(target) }
+    }
 
     override fun submitTo(
         node: NodeId,

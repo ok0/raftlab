@@ -16,17 +16,21 @@ stateDiagram-v2
     }
     state "n4" as node3 {
         state "Follower" as node3_Follower
+        state "PreCandidate" as node3_PreCandidate
         state "Candidate" as node3_Candidate
         state "Leader" as node3_Leader
         [*] --> node3_Follower
-        node3_Follower --> node3_Candidate : #1 T1 @130ms election timeout
-        node3_Candidate --> node3_Leader : #2 T1 @136ms won election
+        node3_Follower --> node3_PreCandidate : #1 T0 @130ms election timeout
+        node3_PreCandidate --> node3_Candidate : #2 T1 @136ms pre-vote granted
+        node3_Candidate --> node3_Leader : #3 T1 @142ms won election
     }
     state "n5" as node4 {
         state "Follower" as node4_Follower
+        state "PreCandidate" as node4_PreCandidate
         state "Candidate" as node4_Candidate
         [*] --> node4_Follower
-        node4_Follower --> node4_Candidate : #1 T1 @130ms election timeout
-        node4_Candidate --> node4_Follower : #2 T1 @138ms leader discovered
+        node4_Follower --> node4_PreCandidate : #1 T0 @130ms election timeout
+        node4_PreCandidate --> node4_Candidate : #2 T1 @137ms pre-vote granted
+        node4_Candidate --> node4_Follower : #3 T1 @147ms leader discovered
     }
 ```

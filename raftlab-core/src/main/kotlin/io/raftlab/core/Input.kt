@@ -57,4 +57,19 @@ public sealed interface Input {
         /** Server to remove from the configuration. */
         public val remove: NodeId?,
     ) : Input
+
+    /**
+     * Asks the leader to hand leadership to [target]. Rejected with `Rejection.NotLeader(hint)` when this node is not
+     * the leader, with `Rejection.Unknown` when [target] is this leader, not a voting member, or the leader itself is
+     * outside its configuration, and with `Rejection.Busy` while another transfer, a membership change or a catch-up
+     * is in progress. Once accepted, the leader sends `TimeoutNow` to [target] once [target] has caught up. The
+     * transfer ends on step-down (`Rejection.NotLeader(hint)`) or after `electionTimeoutTicks.last` ticks
+     * (`Rejection.Unknown`). Success is observed through roles; no `Effect.Applied` is produced.
+     */
+    public data class TransferLeadership(
+        /** Caller-chosen id echoed in the eventual [Effect.Rejected]. */
+        public val requestId: Long,
+        /** Voting member that should start the next election. */
+        public val target: NodeId,
+    ) : Input
 }

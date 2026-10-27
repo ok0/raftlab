@@ -13,6 +13,7 @@ internal class ScenarioSpec(
     val steps: List<Step>,
     val expectations: List<Expectation>,
     val snapshotThreshold: Int = RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD,
+    val preVote: Boolean = true,
 ) {
     class TimedAction(
         val time: Long,

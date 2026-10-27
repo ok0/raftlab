@@ -26,12 +26,17 @@ internal class ElectionDocRun(
     val window: LongRange,
 ) {
     companion object {
-        /** Runs the normal election with default options for [seed] and returns the docs window. */
+        /**
+         * Runs the normal election with [options] for [seed] and returns the docs window.
+         *
+         * The default [SimOptions] use the default `RaftConfig`, so pre-vote is on.
+         */
         fun normalElection(
             seed: Long,
             timeLimit: Long = 5_000,
+            options: SimOptions = SimOptions(),
         ): ElectionDocRun {
-            val sim = Simulation(seed, SimOptions())
+            val sim = Simulation(seed, options)
             val elected =
                 sim.runUntil(timeLimit) { s ->
                     s.nodes().any { it.up && it.role == Role.LEADER }

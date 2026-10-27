@@ -4,6 +4,7 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.raftlab.core.RaftConfig
 import io.raftlab.trace.DropReason
+import io.raftlab.trace.LeadershipTransfer
 import io.raftlab.trace.MessageDropped
 import io.raftlab.trace.MessageDuplicated
 import io.raftlab.trace.NodeCrashed
@@ -59,6 +60,9 @@ internal class FuzzScenarioTest {
         plans.all { p -> p.memberships.all { it.at <= FuzzScenario.FAULT_UNTIL } } shouldBe true
         plans.all { p -> p.nodes + p.memberships.count { it.add } <= 7 } shouldBe true
         plans.all { p -> removalsKeepMoreThanThreeMembers(p) } shouldBe true
+        (plans.any { it.transfers.isEmpty() }) shouldBe true
+        (plans.any { it.transfers.isNotEmpty() }) shouldBe true
+        plans.all { p -> p.transfers.all { it.at <= FuzzScenario.FAULT_UNTIL } } shouldBe true
     }
 
     private fun removalsKeepMoreThanThreeMembers(plan: FuzzPlan): Boolean {
@@ -126,6 +130,9 @@ internal class FuzzScenarioTest {
         (addSeeds >= 15) shouldBe true
         (removeSeeds >= 15) shouldBe true
         (leaderRemovalSeeds >= 3) shouldBe true
+        val transferSeeds = results.count { r -> r.trace.any { it is LeadershipTransfer } }
+        println("fuzz transfer coverage: LeadershipTransfer seeds=$transferSeeds")
+        (transferSeeds >= 10) shouldBe true
     }
 
     private fun restartsAfterSnapshot(trace: List<TraceEvent>): Boolean =

@@ -138,6 +138,37 @@ fun rvr(
     granted: Boolean = true,
 ) = RequestVoteResponse(term, from, to, granted, false)
 
+fun prv(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    lastIndex: Long = 0,
+    lastTerm: Long = 0,
+) = RequestVote(term, from, to, lastIndex, lastTerm, true)
+
+fun prvr(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    granted: Boolean = true,
+) = RequestVoteResponse(term, from, to, granted, true)
+
+/**
+ * Runs an election timeout and, when the node starts with a pre-vote round, feeds it pre-vote grants from its peers
+ * in sorted order until it becomes a candidate. Works for both `RaftConfig.preVote` settings.
+ */
+fun RaftNode.campaign(): List<Effect> {
+    var last = tick(10)
+    if (role == Role.PRE_CANDIDATE) {
+        for (p in members.filter { it != id }.sortedBy { it.value }) {
+            if (role != Role.PRE_CANDIDATE) break
+            last = receive(prvr(currentTerm + 1, p))
+        }
+    }
+    check(role == Role.CANDIDATE || role == Role.LEADER)
+    return last
+}
+
 fun ae(
     term: Long,
     from: NodeId,
@@ -200,7 +231,7 @@ fun leaderAtTerm1(
     trace: TraceSink = TraceSink { },
 ): RaftNode {
     val leader = node(storage = storage, trace = trace)
-    leader.tick(10)
+    leader.campaign()
     leader.receive(rvr(1, n2))
     check(leader.role == Role.LEADER)
     return leader
@@ -219,7 +250,7 @@ fun RaftNode.winElection(
 ): List<Effect> = winElectionWith(listOf(first, second))
 
 private fun RaftNode.winElectionWith(voters: List<NodeId>): List<Effect> {
-    tick(10)
+    campaign()
     var last = emptyList<Effect>()
     for (v in voters) {
         last = receive(rvr(currentTerm, v))

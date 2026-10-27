@@ -22,6 +22,7 @@ import io.raftlab.trace.NodeId
  * @property crashes Crash windows, lane by lane and in time order within each lane.
  * @property snapshotThreshold Snapshot threshold of every node; low values make snapshots and installs frequent.
  * @property memberships Membership events, one at a time and in time order.
+ * @property transfers Leadership transfer events, one at a time and in time order.
  */
 internal data class FuzzPlan(
     val nodes: Int,
@@ -36,6 +37,7 @@ internal data class FuzzPlan(
     val crashes: List<CrashWindow>,
     val snapshotThreshold: Int,
     val memberships: List<MembershipEvent>,
+    val transfers: List<TransferEvent>,
 ) {
     /** Largest number of nodes that may be down at the same time without losing a majority. */
     val maxDown: Int get() = (nodes - 1) / 2
@@ -79,6 +81,15 @@ internal data class FuzzPlan(
         val pick: Int,
     )
 
+    /**
+     * Transfer leadership at [at] ms to the member at `pick % size` of the sorted members of the leader other than
+     * itself.
+     */
+    data class TransferEvent(
+        val at: Long,
+        val pick: Int,
+    )
+
     companion object {
         /** Largest number of node ids ever created in a run, including nodes added by membership events. */
         const val MAX_NODES_WITH_ADDS = 7
@@ -91,6 +102,12 @@ internal data class FuzzPlan(
 
         /** Minimum gap in ms between the times of consecutive membership events. */
         const val MEMBERSHIP_GAP = 200L
+
+        /** Upper bound (exclusive) of transfer events per run. */
+        const val TRANSFER_EVENTS = 3L
+
+        /** Minimum gap in ms between the times of consecutive transfer events. */
+        const val TRANSFER_GAP = 200L
 
         private val DROP_RATES = listOf(0, 10, 30, 60)
         private val DUPLICATE_RATES = listOf(0, 20, 50)
@@ -191,6 +208,17 @@ internal data class FuzzPlan(
                 mCursor = at + MEMBERSHIP_GAP
             }
 
+            val transferCount = r.nextLong(TRANSFER_EVENTS).toInt()
+            var tCursor = FuzzScenario.FAULT_FROM
+            val transfers = ArrayList<TransferEvent>()
+            for (k in 0 until transferCount) {
+                val at = tCursor + r.nextLong(1_000)
+                val pick = r.nextLong(1000).toInt()
+                if (at > FuzzScenario.FAULT_UNTIL) break
+                transfers += TransferEvent(at, pick)
+                tCursor = at + TRANSFER_GAP
+            }
+
             return FuzzPlan(
                 nodes = nodes,
                 faults = faults,
@@ -204,6 +232,7 @@ internal data class FuzzPlan(
                 crashes = crashes,
                 snapshotThreshold = snapshotThreshold,
                 memberships = memberships,
+                transfers = transfers,
             )
         }
 

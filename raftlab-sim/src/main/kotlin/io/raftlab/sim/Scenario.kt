@@ -44,5 +44,6 @@ public class Scenario internal constructor(
         checker: InvariantChecker = InvariantChecker.standard(),
         mutations: Set<Mutation> = emptySet(),
         requestHook: ClientRequestHook? = null,
-    ): ScenarioRun = ScenarioRun(spec(seed), seed, faults, checker, mutations, requestHook)
+        preVote: Boolean? = null,
+    ): ScenarioRun = ScenarioRun(spec(seed), seed, faults, checker, mutations, requestHook, preVote)
 }

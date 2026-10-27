@@ -8,7 +8,7 @@ class RaftNodeElectionTest {
     @Test
     fun followerTimesOutAndWinsWithOnePeerVote() {
         val storage = RecordingStorage()
-        val candidate = node(storage = storage)
+        val candidate = node(storage = storage, config = RaftConfig(preVote = false))
         candidate.tick(9) shouldBe emptyList<Effect>()
         candidate.role shouldBe Role.FOLLOWER
         candidate.currentTerm shouldBe 0L
@@ -34,7 +34,7 @@ class RaftNodeElectionTest {
 
     @Test
     fun heartbeatsKeepFollowerFromElecting() {
-        val follower = node()
+        val follower = node(config = RaftConfig(preVote = false))
         repeat(50) {
             follower.tick(5) shouldBe emptyList<Effect>()
             follower.receive(ae(1, n2)).sent() shouldBe
@@ -49,7 +49,7 @@ class RaftNodeElectionTest {
 
     @Test
     fun voteGrantResetsElectionTimer() {
-        val follower = node()
+        val follower = node(config = RaftConfig(preVote = false))
         follower.tick(9) shouldBe emptyList<Effect>()
         follower.receive(rv(1, n2)).sent() shouldBe
             listOf<RaftMessage>(
@@ -66,7 +66,7 @@ class RaftNodeElectionTest {
     @Test
     fun candidateWithoutMajorityReElectsAtHigherTerm() {
         val storage = RecordingStorage()
-        val candidate = node(storage = storage)
+        val candidate = node(storage = storage, config = RaftConfig(preVote = false))
         candidate.tick(10)
         candidate.currentTerm shouldBe 1L
         candidate.tick(9) shouldBe emptyList<Effect>()
@@ -82,7 +82,7 @@ class RaftNodeElectionTest {
 
     @Test
     fun candidateStepsDownOnSameTermAppendEntries() {
-        val candidate = node()
+        val candidate = node(config = RaftConfig(preVote = false))
         candidate.tick(10)
         candidate.receive(ae(1, n2)) shouldBe
             listOf<Effect>(
@@ -113,7 +113,7 @@ class RaftNodeElectionTest {
 
     @Test
     fun duplicateAndStaleVotesCountOnce() {
-        val candidate = node(members = five)
+        val candidate = node(members = five, config = RaftConfig(preVote = false))
         candidate.tick(10)
         candidate.receive(rvr(1, n2))
         candidate.receive(rvr(1, n2))
@@ -131,7 +131,7 @@ class RaftNodeElectionTest {
     @Test
     fun heartbeatsEveryHeartbeatTicks() {
         listOf(3, 5).forEach { heartbeat ->
-            val leader = node(config = RaftConfig(10..20, heartbeat))
+            val leader = node(config = RaftConfig(10..20, heartbeat, preVote = false))
             leader.tick(10)
             leader.receive(rvr(1, n2))
             leader.role shouldBe Role.LEADER

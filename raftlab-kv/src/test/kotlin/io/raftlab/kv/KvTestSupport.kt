@@ -25,9 +25,11 @@ fun kvNode(
 
 fun List<KvServerOutput>.replies(): List<ClientResponse> = filterIsInstance<KvServerOutput.Reply>().map { it.response }
 
+// electLeader ticks one node only; leader stickiness would deny its pre-votes
+// because the other nodes' clocks do not advance.
 class KvCluster(
     seed: Long = 7,
-    config: RaftConfig = RaftConfig(),
+    config: RaftConfig = RaftConfig(preVote = false),
 ) {
     private val ids = listOf(n1, n2, n3)
     val machines: Map<NodeId, KvStateMachine> = ids.associateWith { KvStateMachine() }

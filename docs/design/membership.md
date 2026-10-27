@@ -55,8 +55,7 @@ configuration emits nothing.
 
 ## Known limitation
 
-A removed server that keeps running can disrupt the cluster by starting elections with higher terms. There is no lease
-check on the leader side. Pre-vote is planned for M16.
+Messages other than AppendEntries and InstallSnapshot from non-members are dropped. A removed server that keeps running could still disturb members whose configuration lags. Since M16, pre-vote (on by default) stops this while those members keep hearing the leader; see pre-vote-and-transfer.md. With `preVote = false` the limitation remains. There is no lease check on the leader side.
 
 ## Simulator
 

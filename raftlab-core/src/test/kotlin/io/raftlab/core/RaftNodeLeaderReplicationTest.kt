@@ -11,7 +11,7 @@ internal class RaftNodeLeaderReplicationTest {
     fun electionAppendsNoOpAndFirstAppendEntriesCarriesIt() {
         val storage = RecordingStorage()
         val leader = node(storage = storage)
-        leader.tick(10)
+        leader.campaign()
         leader.receive(rvr(1, n2)).sent() shouldBe
             listOf(
                 AppendEntries(1, n1, n2, 0, 0, listOf(noop(1, 1)), 0, 0),
@@ -44,7 +44,7 @@ internal class RaftNodeLeaderReplicationTest {
                 Effect.Send(AppendEntries(1, n1, n3, 0, 0, listOf(noop(1, 1), cmd(2, 1, "x")), 0, 0)),
             )
         storage.entries(2, 3) shouldBe listOf(cmd(2, 1, "x"))
-        rec.events.last() shouldBe LogAppended(3, 0, NodeId("n1"), 2, 1, EntryKind.COMMAND, "command bytes=1")
+        rec.events.last() shouldBe LogAppended(4, 0, NodeId("n1"), 2, 1, EntryKind.COMMAND, "command bytes=1")
     }
 
     @Test

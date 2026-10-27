@@ -14,7 +14,7 @@ internal class RaftNodeLogTraceTest {
     @Test
     fun leaderReplicateAndCommitIsTraced() {
         val rec = recorder()
-        val l = node(trace = rec)
+        val l = node(trace = rec, config = RaftConfig(preVote = false))
         l.winElection(n2)
         l.propose(1, "a")
         l.receive(aer(1, n2, success = true, matchIndex = 2))

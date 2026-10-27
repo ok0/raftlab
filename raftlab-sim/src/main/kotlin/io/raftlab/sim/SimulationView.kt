@@ -83,4 +83,11 @@ public interface SimulationView {
         node: NodeId,
         op: KvOp,
     ): String
+
+    /**
+     * Asks the current leader to transfer leadership to [target] (`Input.TransferLeadership`); a no-op when there is no
+     * leader. Draws no random numbers. The outcome is visible in roles and in the trace (`LeadershipTransfer`, then the
+     * target's election).
+     */
+    public fun transferLeadership(target: NodeId)
 }

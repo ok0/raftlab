@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 class KvSnapshotInstallTest {
     @Test
     fun installRestoresDataAndSessionsAndDedupsRetry() {
-        val c = KvCluster(config = RaftConfig(snapshotThreshold = 3))
+        val c = KvCluster(config = RaftConfig(snapshotThreshold = 3, preVote = false))
         c.electLeader(n1)
         c.settle(10)
         c.isolated += n3

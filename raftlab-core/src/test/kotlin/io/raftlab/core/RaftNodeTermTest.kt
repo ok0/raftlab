@@ -4,7 +4,7 @@ import io.kotest.matchers.shouldBe
 import io.raftlab.trace.Role
 import org.junit.jupiter.api.Test
 
-private val allRoles = listOf(Role.FOLLOWER, Role.CANDIDATE, Role.LEADER)
+private val allRoles = listOf(Role.FOLLOWER, Role.PRE_CANDIDATE, Role.CANDIDATE, Role.LEADER)
 
 fun inRole(
     role: Role,
@@ -16,19 +16,19 @@ fun inRole(
                 node(storage = storage)
             }
 
-            Role.CANDIDATE -> {
+            Role.PRE_CANDIDATE -> {
                 node(storage = storage).also { it.tick(10) }
             }
 
+            Role.CANDIDATE -> {
+                node(storage = storage, config = RaftConfig(preVote = false)).also { it.tick(10) }
+            }
+
             Role.LEADER -> {
-                node(storage = storage).also {
+                node(storage = storage, config = RaftConfig(preVote = false)).also {
                     it.tick(10)
                     it.receive(rvr(1, n2))
                 }
-            }
-
-            else -> {
-                error("unsupported role $role")
             }
         }
     storage.saves.clear()
@@ -94,7 +94,7 @@ class RaftNodeTermTest {
 
         val candidateStorage = RecordingStorage()
         candidateStorage.saveState(PersistentState(2, null))
-        val candidate = node(storage = candidateStorage)
+        val candidate = node(storage = candidateStorage, config = RaftConfig(preVote = false))
         candidate.tick(10)
         candidateStorage.saves.clear()
         candidate.receive(rvr(2, n2)) shouldBe emptyList<Effect>()

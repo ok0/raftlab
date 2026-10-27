@@ -6,8 +6,8 @@ import io.raftlab.core.RaftConfig
  * Collects the declarations of one scenario: nodes, storage, network faults, clients, timed actions, steps and
  * expectations.
  *
- * Defaults are 5 nodes, [StorageKind.InMemory], fault-free [NetworkFaults] with a delay of 1..5 ms, no clients and a
- * snapshot threshold of 1000 applied entries.
+ * Defaults are 5 nodes, [StorageKind.InMemory], fault-free [NetworkFaults] with a delay of 1..5 ms, no clients, a
+ * snapshot threshold of 1000 applied entries and pre-vote on.
  * Every call validates its arguments at once and throws `IllegalArgumentException` with a message prefixed by
  * `scenario '<name>': `.
  *
@@ -32,6 +32,7 @@ public class ScenarioBuilder internal constructor(
     private var calmAt: Long? = null
     private var load: ClientLoad? = null
     private var threshold = RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD
+    private var preVoteEnabled = true
     private val timed = ArrayList<ScenarioSpec.TimedAction>()
     private val steps = ArrayList<ScenarioSpec.Step>()
     private val expectations = ArrayList<ScenarioSpec.Expectation>()
@@ -55,6 +56,11 @@ public class ScenarioBuilder internal constructor(
     public fun snapshotThreshold(n: Int) {
         require(n >= 1) { "scenario '$name': snapshotThreshold(n) must be at least 1: $n" }
         threshold = n
+    }
+
+    /** Enables or disables the pre-vote phase of every node (`RaftConfig.preVote`); default on. */
+    public fun preVote(enabled: Boolean) {
+        preVoteEnabled = enabled
     }
 
     /** Sets the network faults of the run. */
@@ -188,6 +194,7 @@ public class ScenarioBuilder internal constructor(
             steps.toList(),
             expectations.toList(),
             threshold,
+            preVoteEnabled,
         )
     }
 }

@@ -88,7 +88,7 @@ internal class RaftNodeSnapshotTest {
         val s = InMemoryStorage()
         val leader =
             node(config = RaftConfig(snapshotThreshold = 2), storage = s, stateMachine = SnapshotStateMachine())
-        leader.tick(10)
+        leader.campaign()
         leader.receive(rvr(1, n2))
         leader.propose(1, "a")
         leader.propose(2, "b")

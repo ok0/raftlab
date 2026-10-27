@@ -12,7 +12,7 @@ class RaftNodeTraceTest {
     @Test
     fun electionSequenceEmitsRoleChanges() {
         val rec = recorder()
-        val node = node(trace = rec)
+        val node = node(trace = rec, config = RaftConfig(preVote = false))
         node.tick(10)
         node.receive(rvr(1, n2))
         node.receive(ae(2, n2))
@@ -28,7 +28,7 @@ class RaftNodeTraceTest {
     @Test
     fun reElectionEmitsCandidateToCandidate() {
         val rec = recorder()
-        val node = node(trace = rec)
+        val node = node(trace = rec, config = RaftConfig(preVote = false))
         node.tick(20)
         rec.events[1] shouldBe RoleChanged(1, 0, n1, Role.CANDIDATE, Role.CANDIDATE, 2, "election timeout")
     }
@@ -36,7 +36,7 @@ class RaftNodeTraceTest {
     @Test
     fun candidateDiscoveringLeaderIsTraced() {
         val rec = recorder()
-        val node = node(trace = rec)
+        val node = node(trace = rec, config = RaftConfig(preVote = false))
         node.tick(10)
         node.receive(ae(1, n2))
         rec.events.last() shouldBe RoleChanged(1, 0, n1, Role.CANDIDATE, Role.FOLLOWER, 1, "leader discovered")

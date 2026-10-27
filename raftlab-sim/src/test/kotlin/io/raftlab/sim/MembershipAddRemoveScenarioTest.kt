@@ -41,6 +41,6 @@ internal class MembershipAddRemoveScenarioTest {
     @Test
     fun registeredAfterLaggingFollowerSnapshot() {
         val names = ScenarioLibrary.all.keys.toList()
-        names.takeLast(2) shouldBe listOf("lagging-follower-snapshot", "membership-add-remove")
+        names.takeLast(3) shouldBe listOf("lagging-follower-snapshot", "membership-add-remove", "leadership-transfer")
     }
 }

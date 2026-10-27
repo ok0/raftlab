@@ -6,7 +6,7 @@ The fuzz scenario `fuzz-random` is the detector used for every mutation below.
 
 ## SKIP_LOG_UP_TO_DATE_CHECK
 
-- Raft rule broken: §5.4.1 election restriction. Votes are granted without the log up-to-date check.
+- Raft rule broken: §5.4.1 election restriction. Votes are granted without the log up-to-date check. With pre-vote on, pre-vote grants skip the check too.
 - Config name: `Mutation.SKIP_LOG_UP_TO_DATE_CHECK`.
 - Expected symptom: a candidate with a stale log wins an election and overwrites committed entries.
 - Catching invariant or checker: LeaderCompleteness, StateMachineSafety, linearizability.

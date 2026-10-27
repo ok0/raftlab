@@ -137,6 +137,8 @@ public class Simulation internal constructor(
 
     private var nextMembershipRequestId = MEMBERSHIP_REQUEST_BASE
 
+    private var nextTransferRequestId = TRANSFER_REQUEST_BASE
+
     init {
         require(!hostKv || factory === NodeFactory.RAFT) { "KV hosting requires the RaftNode factory" }
         for (slot in slots) {
@@ -206,6 +208,25 @@ public class Simulation internal constructor(
         route(leader, host.step(Input.Propose(requestId, command.copyOf())))
         afterControl()
         return requestId
+    }
+
+    /**
+     * Asks the current leader with the highest term to transfer leadership to [target]; a no-op when there is no
+     * leader.
+     *
+     * Draws no random numbers. Rejections are discarded (KvServer ignores unknown request ids); usable directly or
+     * inside [at] actions.
+     *
+     * @param target Voting member that should become the next leader.
+     */
+    public fun transferLeadership(target: NodeId) {
+        val leader =
+            slots
+                .filter { !it.removed && it.host?.role == Role.LEADER }
+                .maxByOrNull { checkNotNull(it.host).currentTerm } ?: return
+        val host = checkNotNull(leader.host)
+        route(leader, host.step(Input.TransferLeadership(nextTransferRequestId++, target)))
+        afterControl()
     }
 
     /**
@@ -688,5 +709,6 @@ public class Simulation internal constructor(
         const val MAX_NODES = 9
         const val MEMBERSHIP_RETRY_MS = 50L
         const val MEMBERSHIP_REQUEST_BASE = 1L shl 40
+        const val TRANSFER_REQUEST_BASE = 1L shl 41
     }
 }

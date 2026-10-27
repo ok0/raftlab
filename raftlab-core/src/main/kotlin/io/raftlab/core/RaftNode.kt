@@ -4,6 +4,7 @@ import io.raftlab.trace.CommitAdvanced
 import io.raftlab.trace.ConfigChanged
 import io.raftlab.trace.EntryApplied
 import io.raftlab.trace.EntryKind
+import io.raftlab.trace.LeadershipTransfer
 import io.raftlab.trace.LogAppended
 import io.raftlab.trace.LogTruncated
 import io.raftlab.trace.NodeId
@@ -17,7 +18,10 @@ import java.util.TreeMap
 
 /**
  * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit, apply, snapshots,
- * InstallSnapshot, single-server membership change and linearizable reads (ReadIndex).
+ * InstallSnapshot, single-server membership change, linearizable reads (ReadIndex), a pre-vote phase (config
+ * `preVote`) that runs before a real election, and leader stickiness: a node that heard from a leader within
+ * `electionTimeoutTicks.first` ticks refuses pre-votes. It also supports leadership transfer
+ * (`Input.TransferLeadership`), which hands leadership to a chosen voting member.
  *
  * All behavior is driven by [step]. The node performs no I/O, reads no clock and starts no threads, so the same
  * inputs always produce the same effects.
@@ -93,6 +97,8 @@ public class RaftNode(
     private var readSeq: Long = 0
     private val pendingReads: MutableList<PendingRead> = ArrayList()
     private val readAcks: MutableMap<NodeId, Long> = TreeMap()
+    private var heardLeaderAt: Long? = null
+    private var transfer: Transfer? = null
 
     init {
         require(initialMembers.isNotEmpty()) { "initialMembers must not be empty" }
@@ -130,6 +136,7 @@ public class RaftNode(
             is Input.Propose -> onPropose(input, out)
             is Input.ChangeMembership -> onChangeMembership(input, out)
             is Input.ReadIndex -> onReadIndex(input, out)
+            is Input.TransferLeadership -> onTransferLeadership(input, out)
         }
         return out
     }
@@ -285,6 +292,9 @@ public class RaftNode(
                     abandonCatchUp(Rejection.Unknown, out)
                 }
             }
+            transfer?.let { t ->
+                if (ticks - t.startedAt >= config.electionTimeoutTicks.last) abandonTransfer(Rejection.Unknown, out)
+            }
             heartbeatElapsed++
             if (heartbeatElapsed >= config.heartbeatTicks) {
                 heartbeatElapsed = 0
@@ -292,15 +302,43 @@ public class RaftNode(
             }
         } else {
             electionElapsed++
-            if (electionElapsed >= electionTimeout && id in members) startElection(out)
+            if (electionElapsed >= electionTimeout && id in members) {
+                if (config.preVote) startPreVote(out) else startElection(REASON_TIMEOUT, out)
+            }
+        }
+    }
+
+    /**
+     * Runs a pre-vote round: asks every peer whether it would vote for this node in the next term, without changing
+     * the term or the vote. A single-member cluster starts a real election directly.
+     */
+    private fun startPreVote(out: MutableList<Effect>) {
+        if (members.size == 1) {
+            startElection(REASON_TIMEOUT, out)
+            return
+        }
+        val from = role
+        role = Role.PRE_CANDIDATE
+        leaderHint = null
+        votesGranted.clear()
+        votesGranted.add(id)
+        resetElectionTimer()
+        if (from != Role.PRE_CANDIDATE) emitRoleChanged(from, Role.PRE_CANDIDATE, REASON_TIMEOUT)
+        val proposed = currentTerm + 1
+        for (peer in peers) {
+            out.add(Effect.Send(RequestVote(proposed, id, peer, lastLogIndex(), lastLogTerm(), true)))
         }
     }
 
     /**
      * Starts a new election in the next term. A CANDIDATE that times out again also starts a new election, and its
-     * role-changed event (CANDIDATE to CANDIDATE) marks the new term.
+     * role-changed event (CANDIDATE to CANDIDATE) marks the new term. [reason] is the reason recorded on the
+     * role-changed event.
      */
-    private fun startElection(out: MutableList<Effect>) {
+    private fun startElection(
+        reason: String,
+        out: MutableList<Effect>,
+    ) {
         val from = role
         currentTerm += 1
         votedFor = id
@@ -310,7 +348,7 @@ public class RaftNode(
         votesGranted.clear()
         votesGranted.add(id)
         resetElectionTimer()
-        emitRoleChanged(from, Role.CANDIDATE, REASON_TIMEOUT)
+        emitRoleChanged(from, Role.CANDIDATE, reason)
         if (hasMajority()) {
             becomeLeader(out)
         } else {
@@ -557,6 +595,10 @@ public class RaftNode(
             out.add(Effect.Rejected(input.requestId, Rejection.NotLeader(leaderHint)))
             return
         }
+        if (transfer != null) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Busy))
+            return
+        }
         val entry = LogEntry(lastLogIndex() + 1, currentTerm, EntryPayload.Command(input.command.copyOf()))
         appendToLog(listOf(entry))
         pending[entry.index] = input.requestId
@@ -572,7 +614,7 @@ public class RaftNode(
             out.add(Effect.Rejected(input.requestId, Rejection.NotLeader(leaderHint)))
             return
         }
-        if (configIndex > commitIndex || catchUp != null || commitIndex < termStartIndex) {
+        if (transfer != null || configIndex > commitIndex || catchUp != null || commitIndex < termStartIndex) {
             out.add(Effect.Rejected(input.requestId, Rejection.Busy))
             return
         }
@@ -647,11 +689,13 @@ public class RaftNode(
         leaderHint = null
         abandonPending(out)
         abandonReads(out)
+        abandonTransfer(Rejection.NotLeader(null), out)
     }
 
     private fun stepDownToHigherTerm(
         term: Long,
         out: MutableList<Effect>,
+        transferHint: NodeId? = null,
     ) {
         currentTerm = term
         votedFor = null
@@ -665,8 +709,58 @@ public class RaftNode(
                 abandonPending(out)
                 abandonReads(out)
                 abandonCatchUp(Rejection.NotLeader(leaderHint), out)
+                abandonTransfer(Rejection.NotLeader(transferHint), out)
             }
         }
+    }
+
+    private fun onTransferLeadership(
+        input: Input.TransferLeadership,
+        out: MutableList<Effect>,
+    ) {
+        if (role != Role.LEADER) {
+            out.add(Effect.Rejected(input.requestId, Rejection.NotLeader(leaderHint)))
+            return
+        }
+        val target = input.target
+        if (target == id || target !in members || id !in members) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Unknown))
+            return
+        }
+        if (transfer != null || catchUp != null || configIndex > commitIndex) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Busy))
+            return
+        }
+        transfer = Transfer(input.requestId, target, ticks)
+        val node = id
+        trace.emit { seq, time -> LeadershipTransfer(seq, time, node, target) }
+        if (!maybeSendTimeoutNow(out)) sendAppendEntries(target, out)
+    }
+
+    private fun maybeSendTimeoutNow(out: MutableList<Effect>): Boolean {
+        val t = transfer ?: return false
+        if (role != Role.LEADER || t.timeoutNowSent) return false
+        if ((matchIndex[t.target] ?: 0L) != lastLogIndex()) return false
+        t.timeoutNowSent = true
+        out.add(Effect.Send(TimeoutNow(currentTerm, id, t.target)))
+        return true
+    }
+
+    private fun abandonTransfer(
+        reason: Rejection,
+        out: MutableList<Effect>,
+    ) {
+        val t = transfer ?: return
+        transfer = null
+        out.add(Effect.Rejected(t.requestId, reason))
+    }
+
+    private fun handleTimeoutNow(
+        msg: TimeoutNow,
+        out: MutableList<Effect>,
+    ) {
+        if (role == Role.LEADER || msg.from != leaderHint || id !in members) return
+        startElection(REASON_TRANSFER, out)
     }
 
     private fun onReceive(
@@ -677,9 +771,17 @@ public class RaftNode(
         if (msg !is AppendEntries && msg !is InstallSnapshot && msg.from !in members && msg.from != catchUp?.target) {
             return
         }
-        if (msg is RequestVote && msg.preVote) return
-        if (msg is RequestVoteResponse && msg.preVote) return
-        if (msg.term > currentTerm) stepDownToHigherTerm(msg.term, out)
+        if (msg is RequestVote && msg.preVote) {
+            if (config.preVote) handlePreVoteRequest(msg, out)
+            return
+        }
+        if (msg is RequestVoteResponse && msg.preVote) {
+            if (config.preVote) handlePreVoteResponse(msg, out)
+            return
+        }
+        if (msg.term > currentTerm) {
+            stepDownToHigherTerm(msg.term, out, if (msg is AppendEntries || msg is InstallSnapshot) msg.from else null)
+        }
         if (msg.term < currentTerm) {
             when (msg) {
                 is RequestVote -> {
@@ -704,24 +806,79 @@ public class RaftNode(
             return
         }
         when (msg) {
-            is RequestVote -> handleRequestVote(msg, out)
-            is RequestVoteResponse -> handleVoteResponse(msg, out)
-            is AppendEntries -> handleAppendEntries(msg, out)
-            is AppendEntriesResponse -> handleAppendEntriesResponse(msg, out)
-            is InstallSnapshot -> handleInstallSnapshot(msg, out)
-            is InstallSnapshotResponse -> handleInstallSnapshotResponse(msg, out)
-            else -> Unit
+            is RequestVote -> {
+                handleRequestVote(msg, out)
+            }
+
+            is RequestVoteResponse -> {
+                handleVoteResponse(msg, out)
+            }
+
+            is AppendEntries -> {
+                handleAppendEntries(msg, out)
+            }
+
+            is AppendEntriesResponse -> {
+                handleAppendEntriesResponse(msg, out)
+                maybeSendTimeoutNow(out)
+            }
+
+            is InstallSnapshot -> {
+                handleInstallSnapshot(msg, out)
+            }
+
+            is InstallSnapshotResponse -> {
+                handleInstallSnapshotResponse(msg, out)
+                maybeSendTimeoutNow(out)
+            }
+
+            is TimeoutNow -> {
+                handleTimeoutNow(msg, out)
+            }
         }
+    }
+
+    private fun logUpToDate(
+        lastIndex: Long,
+        lastTerm: Long,
+    ): Boolean =
+        Mutation.SKIP_LOG_UP_TO_DATE_CHECK in config.mutations ||
+            lastTerm > lastLogTerm() ||
+            (lastTerm == lastLogTerm() && lastIndex >= lastLogIndex())
+
+    private fun handlePreVoteRequest(
+        msg: RequestVote,
+        out: MutableList<Effect>,
+    ) {
+        val heardRecently = heardLeaderAt?.let { ticks - it < config.electionTimeoutTicks.first } == true
+        val leaderRecent = role == Role.LEADER || heardRecently
+        val grant =
+            msg.from in members &&
+                msg.term > currentTerm &&
+                logUpToDate(msg.lastLogIndex, msg.lastLogTerm) &&
+                !leaderRecent
+        val replyTerm = if (grant) msg.term else currentTerm
+        out.add(Effect.Send(RequestVoteResponse(replyTerm, id, msg.from, grant, true)))
+    }
+
+    private fun handlePreVoteResponse(
+        msg: RequestVoteResponse,
+        out: MutableList<Effect>,
+    ) {
+        if (!msg.granted) {
+            if (msg.term > currentTerm) stepDownToHigherTerm(msg.term, out)
+            return
+        }
+        if (role != Role.PRE_CANDIDATE || msg.term != currentTerm + 1) return
+        votesGranted.add(msg.from)
+        if (hasMajority()) startElection(REASON_PRE_VOTE, out)
     }
 
     private fun handleRequestVote(
         msg: RequestVote,
         out: MutableList<Effect>,
     ) {
-        val upToDate =
-            Mutation.SKIP_LOG_UP_TO_DATE_CHECK in config.mutations ||
-                msg.lastLogTerm > lastLogTerm() ||
-                (msg.lastLogTerm == lastLogTerm() && msg.lastLogIndex >= lastLogIndex())
+        val upToDate = logUpToDate(msg.lastLogIndex, msg.lastLogTerm)
         val canVote = votedFor == null || votedFor == msg.from
         val grant = canVote && upToDate
         if (grant) {
@@ -747,11 +904,12 @@ public class RaftNode(
         out: MutableList<Effect>,
     ) {
         if (role == Role.LEADER) return
-        if (role == Role.CANDIDATE) {
-            emitRoleChanged(Role.CANDIDATE, Role.FOLLOWER, REASON_LEADER)
+        if (role == Role.CANDIDATE || role == Role.PRE_CANDIDATE) {
+            emitRoleChanged(role, Role.FOLLOWER, REASON_LEADER)
             role = Role.FOLLOWER
         }
         leaderHint = msg.from
+        heardLeaderAt = ticks
         resetElectionTimer()
         val prev = msg.prevLogIndex
         if (prev > lastLogIndex()) {
@@ -829,11 +987,12 @@ public class RaftNode(
         out: MutableList<Effect>,
     ) {
         if (role == Role.LEADER) return
-        if (role == Role.CANDIDATE) {
-            emitRoleChanged(Role.CANDIDATE, Role.FOLLOWER, REASON_LEADER)
+        if (role == Role.CANDIDATE || role == Role.PRE_CANDIDATE) {
+            emitRoleChanged(role, Role.FOLLOWER, REASON_LEADER)
             role = Role.FOLLOWER
         }
         leaderHint = msg.from
+        heardLeaderAt = ticks
         resetElectionTimer()
         if (msg.lastIndex <= commitIndex) {
             replyInstall(msg, commitIndex, out)
@@ -891,8 +1050,18 @@ public class RaftNode(
         val seq: Long,
     )
 
+    private class Transfer(
+        val requestId: Long,
+        val target: NodeId,
+        val startedAt: Long,
+    ) {
+        var timeoutNowSent: Boolean = false
+    }
+
     private companion object {
         const val REASON_TIMEOUT = "election timeout"
+        const val REASON_PRE_VOTE = "pre-vote granted"
+        const val REASON_TRANSFER = "leadership transfer"
         const val REASON_WON = "won election"
         const val REASON_HIGHER_TERM = "higher term"
         const val REASON_LEADER = "leader discovered"

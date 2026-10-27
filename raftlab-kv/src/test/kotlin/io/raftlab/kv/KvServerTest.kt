@@ -30,7 +30,7 @@ class KvServerTest {
 
     private fun deposedLeader(): Pair<RaftNode, KvServer> {
         val m = KvStateMachine()
-        val node = kvNode(n1, setOf(n1, n2, n3), m)
+        val node = kvNode(n1, setOf(n1, n2, n3), m, config = RaftConfig(preVote = false))
         val server = KvServer(node, m)
         tickUntil(node, server, Role.CANDIDATE, 100)
         node.step(Input.Receive(RequestVoteResponse(node.currentTerm, n2, n1, true, false)))
@@ -90,7 +90,7 @@ class KvServerTest {
     @Test
     fun candidateAnswersNotLeaderNull() {
         val m = KvStateMachine()
-        val node = kvNode(n1, setOf(n1, n2, n3), m)
+        val node = kvNode(n1, setOf(n1, n2, n3), m, config = RaftConfig(preVote = false))
         val server = KvServer(node, m)
         tickUntil(node, server, Role.CANDIDATE, 100)
         node.role shouldBe Role.CANDIDATE

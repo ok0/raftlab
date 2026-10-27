@@ -142,7 +142,7 @@ internal class RaftNodeMembershipTest {
     @Test
     fun catchUpVoteDoesNotCount() {
         val candidate = node()
-        candidate.tick(10)
+        candidate.campaign()
         candidate.receive(rvr(1, n4))
         candidate.role shouldBe Role.CANDIDATE
     }

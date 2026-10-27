@@ -17,7 +17,8 @@ import java.util.TreeSet
  * Expectations: one live leader, all nodes up, all client operations completed, logs and data agree, and the final
  * write committed. The snapshot threshold is drawn too, by [FuzzPlan.draw]. Membership events drawn by [FuzzPlan] add
  * or remove one node at a time; a removing node is never crashed or restarted, and the membership of the cluster
- * must be committed at the end.
+ * must be committed at the end. Transfer events drawn by [FuzzPlan] ask the leader to hand leadership to another
+ * member.
  */
 internal object FuzzScenario {
     /** Name of the scenario. */
@@ -107,6 +108,13 @@ internal object FuzzScenario {
                             removeNode(target)
                         }
                     }
+                }
+            }
+            for (t in plan.transfers) {
+                at(t.at) {
+                    val l = leader() ?: return@at
+                    val c = l.members.filter { it != l.id }.sorted()
+                    if (c.isNotEmpty()) transferLeadership(c[t.pick % c.size])
                 }
             }
             at(CALM_AT) {

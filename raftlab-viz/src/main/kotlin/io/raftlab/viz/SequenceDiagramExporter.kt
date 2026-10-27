@@ -1,6 +1,7 @@
 package io.raftlab.viz
 
 import io.raftlab.trace.CommitAdvanced
+import io.raftlab.trace.LeadershipTransfer
 import io.raftlab.trace.MessageDelivered
 import io.raftlab.trace.MessageDropped
 import io.raftlab.trace.MessageDuplicated
@@ -190,6 +191,10 @@ public class SequenceDiagramExporter {
 
             is NodeRestarted -> {
                 "restarted"
+            }
+
+            is LeadershipTransfer -> {
+                "leadership transfer to ${MermaidText.label(event.target.value)}"
             }
 
             else -> {

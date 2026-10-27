@@ -4,6 +4,7 @@ package io.raftlab.core
  * Tunable timing for a [RaftNode], in ticks, plus test-only [Mutation]s and the snapshot threshold.
  *
  * A node takes a snapshot once more than [snapshotThreshold] applied entries lie after its last snapshot.
+ * With [preVote] enabled, a node runs a pre-vote round before it starts a real election.
  */
 public data class RaftConfig(
     /** Inclusive range the election timeout is drawn from on every timer reset. */
@@ -16,6 +17,12 @@ public data class RaftConfig(
     public val mutations: Set<Mutation> = emptySet(),
     /** Snapshot is taken once `lastApplied - snapshotIndex` exceeds this; must be at least 1. */
     public val snapshotThreshold: Int = DEFAULT_SNAPSHOT_THRESHOLD,
+    /**
+     * When true (default), a node whose election timer expires first runs a pre-vote round as PRE_CANDIDATE. It starts
+     * a real election only after a majority would vote for it. When false, pre-vote requests and responses are ignored
+     * and the node behaves as before pre-vote existed.
+     */
+    public val preVote: Boolean = true,
 ) {
     init {
         require(!electionTimeoutTicks.isEmpty()) { "electionTimeoutTicks must not be empty: $electionTimeoutTicks" }

@@ -106,7 +106,7 @@ internal class RaftNodeReadIndexTest {
     fun readIndexIsCommitAtReceiptAndAppliedAtCompletion() {
         val sm = RecordingStateMachine()
         val l = node(stateMachine = sm)
-        l.tick(10)
+        l.campaign()
         l.receive(rvr(1, n2))
         l.receive(aer(1, n2, matchIndex = 1))
         l.step(Input.ReadIndex(7))

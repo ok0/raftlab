@@ -8,9 +8,30 @@ import io.raftlab.trace.MessageDelivered
 import io.raftlab.trace.MessageSent
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.PartitionChanged
+import io.raftlab.trace.Role
+import io.raftlab.trace.RoleChanged
 import org.junit.jupiter.api.Test
 
 class ScenarioDslTest {
+    @Test
+    fun preVoteKnobControlsPreVoteMessages() {
+        fun sc(on: Boolean) =
+            scenario("pv-$on") {
+                nodes(3)
+                preVote(on)
+                awaitLeader(1_000)
+                runFor(500)
+            }
+        val on = sc(true).run(1)
+        on.trace.filterIsInstance<MessageSent>().any { it.summary.contains("preVote=true") } shouldBe true
+        val off = sc(false).run(1)
+        off.trace.filterIsInstance<MessageSent>().any { it.summary.contains("preVote=true") } shouldBe false
+        off.trace.filterIsInstance<RoleChanged>().any { it.to == Role.LEADER } shouldBe true
+        off.trace.filterIsInstance<RoleChanged>().any { it.to == Role.PRE_CANDIDATE } shouldBe false
+        val offSecond = sc(false).run(2)
+        offSecond.trace.filterIsInstance<RoleChanged>().any { it.to == Role.PRE_CANDIDATE } shouldBe false
+    }
+
     @Test
     fun builderFunctions() {
         val nodes =
