@@ -14,18 +14,114 @@ concurrency:
 
 jobs:
   build:
-    name: Build (JDK 21)
+    name: Build (JDK ${{ matrix.java }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ["21", "25"]
     steps:
       - name: Check out
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Set up JDK 21 (toolchain)
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up JDK ${{ matrix.java }} (Gradle runtime)
+        if: matrix.java != '21'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Build
+        shell: bash
+        run: |
+          java -version
+          start=$SECONDS
+          ./gradlew build -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+          elapsed=$((SECONDS - start))
+          echo "::notice title=Build time (JDK ${{ matrix.java }})::./gradlew build took ${elapsed}s (budget 300s)"
+          echo "Build time on JDK ${{ matrix.java }}: ${elapsed}s (budget 300s)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Coverage reports
+        if: matrix.java == '21'
+        run: ./gradlew :koverXmlReport :koverHtmlReport -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+      - name: Coverage summary
+        if: matrix.java == '21'
+        run: python3 -I scripts/coverage-summary.py build/reports/kover/report.xml >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage reports
+        if: matrix.java == '21'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kover-reports
+          path: |
+            build/reports/kover/report.xml
+            build/reports/kover/html/
+          retention-days: 14
+          if-no-files-found: error
+
+  mermaid-validate:
+    name: Mermaid validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.github/mermaid/node_modules/.cache/puppeteer
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Set up Node 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Install pinned mermaid-cli
+        working-directory: .github/mermaid
+        run: npm ci
+      - name: Self-test (broken diagram must be rejected)
+        shell: bash
+        run: |
+          set +e
+          scripts/validate-mermaid.sh .github/mermaid/broken-sample.md
+          rc=$?
+          set -e
+          if [ "$rc" -ne 1 ]; then
+            echo "::error::validate-mermaid.sh exited $rc on .github/mermaid/broken-sample.md (expected 1)"
+            exit 1
+          fi
+          echo "Self-test OK: broken sample rejected"
+      - name: Validate committed Markdown
+        run: scripts/validate-mermaid.sh
+
+  smoke:
+    name: Cluster smoke (JDK 21)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up JDK 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "21"
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-      - name: Build
-        run: ./gradlew build
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Install distribution
+        run: ./gradlew :raftlab-cli:installDist
+      - name: Run cluster smoke
+        shell: bash
+        env:
+          RAFTLAB_SMOKE_TIMEOUT: "180"
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke"
+          scripts/cluster-smoke.sh 2>&1 | tee "$RUNNER_TEMP/smoke/cluster-smoke.log"
+      - name: Upload smoke log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cluster-smoke-log
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn

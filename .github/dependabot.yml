@@ -1,0 +1,25 @@
+# Dependency automation (charter R26). The github-actions ecosystem updates the
+# SHA-pinned `uses:` references in .github/workflows together with their version comments.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: "/.github/mermaid"
+    schedule:
+      interval: weekly
+    groups:
+      mermaid-cli:
+        patterns: ["*"]
