@@ -29,13 +29,14 @@ sequenceDiagram
     P0->>P4: RequestVoteResponse T1 granted=false preVote=false
     P2->>P4: RequestVoteResponse T1 granted=false preVote=false
     Note over P3: Candidate to Leader T1 (won election)
-    P3->>P0: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=0 leaderCommit=0 readSeq=0
-    P3->>P1: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=0 leaderCommit=0 readSeq=0
-    P3->>P2: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=0 leaderCommit=0 readSeq=0
-    P3->>P4: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=0 leaderCommit=0 readSeq=0
-    P2->>P3: AppendEntriesResponse T1 success=true matchIndex=0 conflictIndex=0 conflictTerm=0 readSeq=0
+    P3->>P0: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=1 leaderCommit=0 readSeq=0
+    P3->>P1: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=1 leaderCommit=0 readSeq=0
+    P3->>P2: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=1 leaderCommit=0 readSeq=0
+    P3->>P4: AppendEntries T1 prevLogIndex=0 prevLogTerm=0 entries=1 leaderCommit=0 readSeq=0
+    P2->>P3: AppendEntriesResponse T1 success=true matchIndex=1 conflictIndex=0 conflictTerm=0 readSeq=0
     Note over P4: Candidate to Follower T1 (leader discovered)
-    P4->>P3: AppendEntriesResponse T1 success=true matchIndex=0 conflictIndex=0 conflictTerm=0 readSeq=0
-    P1->>P3: AppendEntriesResponse T1 success=true matchIndex=0 conflictIndex=0 conflictTerm=0 readSeq=0
-    P0->>P3: AppendEntriesResponse T1 success=true matchIndex=0 conflictIndex=0 conflictTerm=0 readSeq=0
+    P4->>P3: AppendEntriesResponse T1 success=true matchIndex=1 conflictIndex=0 conflictTerm=0 readSeq=0
+    P1->>P3: AppendEntriesResponse T1 success=true matchIndex=1 conflictIndex=0 conflictTerm=0 readSeq=0
+    P0->>P3: AppendEntriesResponse T1 success=true matchIndex=1 conflictIndex=0 conflictTerm=0 readSeq=0
+    Note over P3: commit index 1
 ```

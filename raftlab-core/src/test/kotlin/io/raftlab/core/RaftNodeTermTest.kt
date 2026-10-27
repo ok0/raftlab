@@ -41,7 +41,7 @@ class RaftNodeTermTest {
         for (role in allRoles) {
             val storage = RecordingStorage()
             val node = inRole(role, storage)
-            val effects = node.receive(rv(5, n2, lastIndex = 0, lastTerm = 0))
+            val effects = node.receive(rv(5, n2, lastIndex = 1, lastTerm = 5))
             node.role shouldBe Role.FOLLOWER
             node.currentTerm shouldBe 5
             storage.saves.first() shouldBe PersistentState(5, null)

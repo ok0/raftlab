@@ -33,4 +33,16 @@ class RaftConfigTest {
     fun acceptsSingletonRange() {
         RaftConfig(2..2, 1).electionTimeoutTicks shouldBe 2..2
     }
+
+    @Test
+    fun defaultMaxEntriesPerAppendIs64() {
+        RaftConfig().maxEntriesPerAppend shouldBe 64
+    }
+
+    @Test
+    fun rejectsMaxEntriesPerAppendBelowOne() {
+        shouldThrow<IllegalArgumentException> { RaftConfig(maxEntriesPerAppend = 0) }
+        shouldThrow<IllegalArgumentException> { RaftConfig(maxEntriesPerAppend = -1) }
+        RaftConfig(maxEntriesPerAppend = 1).maxEntriesPerAppend shouldBe 1
+    }
 }

@@ -1,5 +1,6 @@
 package io.raftlab.sim
 
+import io.raftlab.core.LogEntry
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.Role
 import java.util.TreeMap
@@ -15,6 +16,10 @@ import java.util.TreeSet
  * @property leaderHint Believed leader; `null` when the node is crashed.
  * @property votedFor Persisted vote for the current term, if any.
  * @property members Cluster membership known to the node.
+ * @property log Live log; persisted log when crashed.
+ * @property commitIndex Commit index; `0` when crashed.
+ * @property lastApplied Last applied index; `0` when crashed.
+ * @property incarnation Number of crashes so far; a change while up means the node restarted with fresh volatile state.
  */
 public data class NodeState(
     /** Node identifier. */
@@ -31,6 +36,14 @@ public data class NodeState(
     public val votedFor: NodeId?,
     /** Cluster membership known to the node. */
     public val members: Set<NodeId>,
+    /** Live log; persisted log when crashed. */
+    public val log: List<LogEntry> = emptyList(),
+    /** Commit index; `0` when crashed. */
+    public val commitIndex: Long = 0,
+    /** Last applied index; `0` when crashed. */
+    public val lastApplied: Long = 0,
+    /** Number of crashes so far; a change while up means the node restarted with fresh volatile state. */
+    public val incarnation: Int = 0,
 )
 
 /**
@@ -119,7 +132,7 @@ public class ElectionSafety : Invariant {
 /**
  * Runs a fixed set of [Invariant]s and turns their findings into [Violation]s.
  *
- * Each instance belongs to one simulation. Milestone M7 adds invariants by adding [Invariant] implementations.
+ * Each instance belongs to one simulation.
  *
  * @property invariants Invariants checked on every call to [check], in order.
  */
@@ -127,6 +140,9 @@ public class InvariantChecker(
     /** Invariants checked on every call to [check], in order. */
     private val invariants: List<Invariant>,
 ) {
+    /** Names of the checked invariants, in order. */
+    public val invariantNames: List<String> get() = invariants.map { it.name }
+
     /**
      * Runs all invariants against the given snapshots.
      *
@@ -146,8 +162,20 @@ public class InvariantChecker(
 
     /** Factory methods for common checker configurations. */
     public companion object {
-        /** Returns a checker with the standard invariants (election safety). */
-        public fun standard(): InvariantChecker = InvariantChecker(listOf(ElectionSafety()))
+        /**
+         * Returns a checker with the standard invariants: election safety, log matching, leader completeness,
+         * state machine safety and commit monotonicity.
+         */
+        public fun standard(): InvariantChecker =
+            InvariantChecker(
+                listOf(
+                    ElectionSafety(),
+                    LogMatching(),
+                    LeaderCompleteness(),
+                    StateMachineSafety(),
+                    CommitMonotonicity(),
+                ),
+            )
 
         /** Returns a checker that checks nothing. */
         public fun none(): InvariantChecker = InvariantChecker(emptyList())

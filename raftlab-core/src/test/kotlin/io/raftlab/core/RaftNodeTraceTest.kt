@@ -1,6 +1,8 @@
 package io.raftlab.core
 
 import io.kotest.matchers.shouldBe
+import io.raftlab.trace.EntryKind
+import io.raftlab.trace.LogAppended
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
 import io.raftlab.trace.VoteCast
@@ -18,7 +20,8 @@ class RaftNodeTraceTest {
             listOf(
                 RoleChanged(0, 0, n1, Role.FOLLOWER, Role.CANDIDATE, 1, "election timeout"),
                 RoleChanged(1, 0, n1, Role.CANDIDATE, Role.LEADER, 1, "won election"),
-                RoleChanged(2, 0, n1, Role.LEADER, Role.FOLLOWER, 2, "higher term"),
+                LogAppended(2, 0, n1, 1, 1, EntryKind.NOOP, "noop"),
+                RoleChanged(3, 0, n1, Role.LEADER, Role.FOLLOWER, 2, "higher term"),
             )
     }
 

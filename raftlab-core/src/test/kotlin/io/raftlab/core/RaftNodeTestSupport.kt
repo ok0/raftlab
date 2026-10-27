@@ -50,6 +50,22 @@ object NoopStateMachine : StateMachine {
     override fun restore(data: ByteArray) {}
 }
 
+class RecordingStateMachine : StateMachine {
+    val applied = mutableListOf<Pair<Long, String>>()
+
+    override fun apply(
+        index: Long,
+        command: ByteArray,
+    ): ByteArray {
+        applied += index to command.decodeToString()
+        return "r$index".encodeToByteArray()
+    }
+
+    override fun snapshot(): ByteArray = ByteArray(0)
+
+    override fun restore(data: ByteArray) {}
+}
+
 fun node(
     id: NodeId = n1,
     members: Set<NodeId> = three,
@@ -57,7 +73,8 @@ fun node(
     storage: RaftStorage = InMemoryStorage(),
     random: RandomSource = FixedRandom(),
     trace: TraceSink = TraceSink { },
-): RaftNode = RaftNode(id, members, config, storage, NoopStateMachine, random, trace)
+    stateMachine: StateMachine = NoopStateMachine,
+): RaftNode = RaftNode(id, members, config, storage, stateMachine, random, trace)
 
 fun RaftNode.tick(times: Int = 1): List<Effect> = (1..times).flatMap { step(Input.Tick) }
 
@@ -88,6 +105,49 @@ fun ae(
     prevTerm: Long = 0,
 ) = AppendEntries(term, from, to, prevIndex, prevTerm, emptyList(), 0, 0)
 
+fun aeWith(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    prevIndex: Long = 0,
+    prevTerm: Long = 0,
+    entries: List<LogEntry> = emptyList(),
+    leaderCommit: Long = 0,
+) = AppendEntries(term, from, to, prevIndex, prevTerm, entries, leaderCommit, 0)
+
+fun aer(
+    term: Long,
+    from: NodeId,
+    to: NodeId = n1,
+    success: Boolean = true,
+    matchIndex: Long = 0,
+    conflictIndex: Long = 0,
+    conflictTerm: Long = 0,
+) = AppendEntriesResponse(term, from, to, success, matchIndex, conflictIndex, conflictTerm, 0)
+
+fun noop(
+    index: Long,
+    term: Long,
+) = LogEntry(index, term, EntryPayload.NoOp)
+
+fun cmd(
+    index: Long,
+    term: Long,
+    text: String,
+) = LogEntry(index, term, EntryPayload.Command(text.encodeToByteArray()))
+
+fun logWithTerms(vararg terms: Long): List<LogEntry> = terms.mapIndexed { i, t -> cmd(i + 1L, t, "e${i + 1}") }
+
+fun storageWith(
+    term: Long,
+    entries: List<LogEntry>,
+): InMemoryStorage {
+    val storage = InMemoryStorage()
+    storage.saveState(PersistentState(term, null))
+    storage.append(entries)
+    return storage
+}
+
 fun storageWithLog(vararg terms: Long): InMemoryStorage {
     val storage = InMemoryStorage()
     storage.append(terms.mapIndexed { i, term -> LogEntry(i + 1L, term, EntryPayload.NoOp) })
@@ -103,6 +163,28 @@ fun leaderAtTerm1(
     leader.receive(rvr(1, n2))
     check(leader.role == Role.LEADER)
     return leader
+}
+
+fun RaftNode.propose(
+    requestId: Long,
+    text: String,
+): List<Effect> = step(Input.Propose(requestId, text.encodeToByteArray()))
+
+fun RaftNode.winElection(voter: NodeId): List<Effect> = winElectionWith(listOf(voter))
+
+fun RaftNode.winElection(
+    first: NodeId,
+    second: NodeId,
+): List<Effect> = winElectionWith(listOf(first, second))
+
+private fun RaftNode.winElectionWith(voters: List<NodeId>): List<Effect> {
+    tick(10)
+    var last = emptyList<Effect>()
+    for (v in voters) {
+        last = receive(rvr(currentTerm, v))
+    }
+    check(role == Role.LEADER)
+    return last
 }
 
 fun recorder() = TraceRecorder { 0L }

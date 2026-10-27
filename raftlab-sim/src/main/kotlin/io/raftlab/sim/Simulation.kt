@@ -9,6 +9,7 @@ import io.raftlab.trace.NodeCrashed
 import io.raftlab.trace.NodeId
 import io.raftlab.trace.NodeRestarted
 import io.raftlab.trace.NodeStarted
+import io.raftlab.trace.Role
 import io.raftlab.trace.TraceEvent
 import io.raftlab.trace.TraceRecorder
 
@@ -55,6 +56,7 @@ public class Simulation internal constructor(
         val index: Int,
     ) {
         val storage = InMemoryStorage()
+        var stateMachine = RecordingStateMachine()
         val random = SimStreams.node(seed, index)
         var host: HostedNode? = null
         var incarnation = 0
@@ -81,9 +83,20 @@ public class Simulation internal constructor(
 
     private var processing = false
 
+    private var nextRequestId = 1L
+
     init {
         for (slot in slots) {
-            slot.host = factory.create(slot.id, memberSet, options.raftConfig, slot.storage, slot.random, recorder)
+            slot.host =
+                factory.create(
+                    slot.id,
+                    memberSet,
+                    options.raftConfig,
+                    slot.storage,
+                    slot.stateMachine,
+                    slot.random,
+                    recorder,
+                )
             val id = slot.id
             recorder.emit { seq, time -> NodeStarted(seq, time, id) }
         }
@@ -118,6 +131,34 @@ public class Simulation internal constructor(
     public fun nodes(): List<NodeState> = slots.map { snapshot(it) }
 
     /**
+     * Returns the state machine of the node's current (or last) incarnation.
+     *
+     * @param id Node to inspect; must be one of [nodeIds].
+     * @return The recording state machine of that node's incarnation.
+     */
+    public fun stateMachine(id: NodeId): RecordingStateMachine = slot(id).stateMachine
+
+    /**
+     * Proposes a command to the running leader with the highest term, if any.
+     *
+     * Usable directly or inside [at] actions. Records no trace event and draws no random numbers.
+     *
+     * @param command Command bytes to propose.
+     * @return The request id assigned to the proposal, or `null` when no node is leader.
+     */
+    public fun propose(command: ByteArray): Long? {
+        val leaders =
+            slots
+                .mapNotNull { it.host }
+                .filter { it.role == Role.LEADER }
+        val leader = leaders.maxByOrNull { it.currentTerm } ?: return null
+        val requestId = nextRequestId++
+        route(leader.step(Input.Propose(requestId, command.copyOf())))
+        afterControl()
+        return requestId
+    }
+
+    /**
      * Crashes a running node, discarding its volatile state and pending timers.
      *
      * @param id Node to crash; must be running.
@@ -139,7 +180,17 @@ public class Simulation internal constructor(
     public fun restart(id: NodeId) {
         val s = slot(id)
         check(s.host == null) { "node ${id.value} is not crashed" }
-        s.host = factory.create(id, memberSet, options.raftConfig, s.storage, s.random, recorder)
+        s.stateMachine = RecordingStateMachine()
+        s.host =
+            factory.create(
+                id,
+                memberSet,
+                options.raftConfig,
+                s.storage,
+                s.stateMachine,
+                s.random,
+                recorder,
+            )
         recorder.emit { seq, time -> NodeRestarted(seq, time, id) }
         queue.push((now / options.tickMillis + 1) * options.tickMillis, SimEvent.Tick(id, s.incarnation))
         afterControl()
@@ -238,9 +289,33 @@ public class Simulation internal constructor(
         val p = s.storage.loadState()
         val h = s.host
         return if (h != null) {
-            NodeState(s.id, true, h.role, h.currentTerm, h.leaderHint, p.votedFor, h.members)
+            NodeState(
+                s.id,
+                true,
+                h.role,
+                h.currentTerm,
+                h.leaderHint,
+                p.votedFor,
+                h.members,
+                h.log(),
+                h.commitIndex,
+                h.lastApplied,
+                s.incarnation,
+            )
         } else {
-            NodeState(s.id, false, null, p.term, null, p.votedFor, memberSet)
+            NodeState(
+                s.id,
+                false,
+                null,
+                p.term,
+                null,
+                p.votedFor,
+                memberSet,
+                s.storage.entries(1, s.storage.lastIndex() + 1),
+                0,
+                0,
+                s.incarnation,
+            )
         }
     }
 
@@ -291,6 +366,7 @@ public class Simulation internal constructor(
         for (e in effects) {
             when (e) {
                 is Effect.Send -> schedule(network.send(e.msg, now))
+                is Effect.Applied, is Effect.Rejected -> Unit
             }
         }
     }

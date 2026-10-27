@@ -2,6 +2,7 @@ package io.raftlab.sim
 
 import io.raftlab.core.Effect
 import io.raftlab.core.Input
+import io.raftlab.core.LogEntry
 import io.raftlab.core.RaftConfig
 import io.raftlab.core.RaftNode
 import io.raftlab.core.RaftStorage
@@ -18,8 +19,12 @@ internal interface HostedNode {
     val currentTerm: Long
     val leaderHint: NodeId?
     val members: Set<NodeId>
+    val commitIndex: Long
+    val lastApplied: Long
 
     fun step(input: Input): List<Effect>
+
+    fun log(): List<LogEntry>
 }
 
 /** Adapts a real [RaftNode] to [HostedNode]. */
@@ -31,20 +36,12 @@ internal class RaftNodeHost(
     override val currentTerm: Long get() = node.currentTerm
     override val leaderHint: NodeId? get() = node.leaderHint
     override val members: Set<NodeId> get() = node.members
+    override val commitIndex: Long get() = node.commitIndex
+    override val lastApplied: Long get() = node.lastApplied
 
     override fun step(input: Input): List<Effect> = node.step(input)
-}
 
-/** State machine that ignores all commands. */
-internal object NoopStateMachine : StateMachine {
-    override fun apply(
-        index: Long,
-        command: ByteArray,
-    ): ByteArray = ByteArray(0)
-
-    override fun snapshot(): ByteArray = ByteArray(0)
-
-    override fun restore(data: ByteArray) {}
+    override fun log(): List<LogEntry> = node.logSnapshotForChecks()
 }
 
 /** Creates the [HostedNode] for a node id; the seam used for real nodes and test doubles. */
@@ -54,14 +51,15 @@ internal fun interface NodeFactory {
         members: Set<NodeId>,
         config: RaftConfig,
         storage: RaftStorage,
+        stateMachine: StateMachine,
         random: RandomSource,
         trace: TraceSink,
     ): HostedNode
 
     companion object {
         val RAFT: NodeFactory =
-            NodeFactory { id, members, config, storage, random, trace ->
-                RaftNodeHost(RaftNode(id, members, config, storage, NoopStateMachine, random, trace))
+            NodeFactory { id, members, config, storage, stateMachine, random, trace ->
+                RaftNodeHost(RaftNode(id, members, config, storage, stateMachine, random, trace))
             }
     }
 }

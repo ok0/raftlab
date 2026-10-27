@@ -24,11 +24,12 @@ class RaftNodeElectionTest {
 
         candidate.receive(rvr(1, n2)).sent() shouldBe
             listOf<RaftMessage>(
-                AppendEntries(1, n1, n2, 0, 0, emptyList(), 0, 0),
-                AppendEntries(1, n1, n3, 0, 0, emptyList(), 0, 0),
+                AppendEntries(1, n1, n2, 0, 0, listOf(LogEntry(1, 1, EntryPayload.NoOp)), 0, 0),
+                AppendEntries(1, n1, n3, 0, 0, listOf(LogEntry(1, 1, EntryPayload.NoOp)), 0, 0),
             )
         candidate.role shouldBe Role.LEADER
         candidate.leaderHint shouldBe n1
+        candidate.logSnapshotForChecks() shouldBe listOf(LogEntry(1, 1, EntryPayload.NoOp))
     }
 
     @Test
