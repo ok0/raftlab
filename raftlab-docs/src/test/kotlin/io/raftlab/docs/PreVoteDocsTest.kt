@@ -37,7 +37,7 @@ internal class PreVoteDocsTest {
 
     @Test
     fun defaultDocsShowPreVoteRound() {
-        val files = DocsGenerator.generate()
+        val files = DocsGenerator.generate(DocsFixtures.graph)
         val election = files.single { it.path == "election.md" }.content
         election.contains("preVote=true") shouldBe true
         MermaidLint.lint(mermaidBlock(election)) shouldBe emptyList()

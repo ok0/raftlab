@@ -32,7 +32,7 @@ class ElectionDocRunTest {
 
     @Test
     fun electionDiagramShowsVotesAndHeartbeatsWithinCap() {
-        val text = DocsGenerator.generate().first { it.path == "election.md" }.content
+        val text = DocsGenerator.generate(DocsFixtures.graph).first { it.path == "election.md" }.content
         val arrows = text.lines().filter { Regex("^    P\\d+(->>|-x)P\\d+: ").containsMatchIn(it) }
         (arrows.size <= DocEntries.MAX_MESSAGES) shouldBe true
         text.contains("more messages omitted") shouldBe false
@@ -43,7 +43,7 @@ class ElectionDocRunTest {
 
     @Test
     fun rolesDiagramHasFiveNodesAndALeader() {
-        val text = DocsGenerator.generate().first { it.path == "roles-election.md" }.content
+        val text = DocsGenerator.generate(DocsFixtures.graph).first { it.path == "roles-election.md" }.content
         Regex("^    state \"[^\"]+\" as node\\d+ \\{$", RegexOption.MULTILINE).findAll(text).count() shouldBe 5
         text.contains("state \"Leader\" as node") shouldBe true
     }

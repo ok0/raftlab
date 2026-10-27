@@ -50,7 +50,7 @@ internal class ElectionDocRun(
                 }
             if (!done) {
                 throw IllegalStateException(
-                    "first AppendEntries round of $leader not answered within $timeLimit ms for seed $seed",
+                    "first AppendEntries round of ${leader.value} not answered within $timeLimit ms for seed $seed",
                 )
             }
             return ElectionDocRun(seed, leader, sim.trace.toList(), 0L..sim.now)
