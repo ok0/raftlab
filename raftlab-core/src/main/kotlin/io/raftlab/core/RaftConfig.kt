@@ -1,0 +1,18 @@
+package io.raftlab.core
+
+/** Tunable timing for a [RaftNode], in ticks. */
+public data class RaftConfig(
+    /** Inclusive range the election timeout is drawn from on every timer reset. */
+    public val electionTimeoutTicks: IntRange = 10..20,
+    /** Ticks between leader heartbeats; must be below the minimum election timeout. */
+    public val heartbeatTicks: Int = 3,
+) {
+    init {
+        require(!electionTimeoutTicks.isEmpty()) { "electionTimeoutTicks must not be empty: $electionTimeoutTicks" }
+        require(electionTimeoutTicks.first > 0) { "electionTimeoutTicks must be positive: $electionTimeoutTicks" }
+        require(heartbeatTicks > 0) { "heartbeatTicks must be positive: $heartbeatTicks" }
+        require(heartbeatTicks < electionTimeoutTicks.first) {
+            "heartbeatTicks $heartbeatTicks must be below the minimum election timeout ${electionTimeoutTicks.first}"
+        }
+    }
+}
