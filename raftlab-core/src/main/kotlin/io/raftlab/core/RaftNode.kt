@@ -17,7 +17,7 @@ import java.util.TreeMap
 
 /**
  * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit, apply, snapshots,
- * InstallSnapshot and single-server membership change.
+ * InstallSnapshot, single-server membership change and linearizable reads (ReadIndex).
  *
  * All behavior is driven by [step]. The node performs no I/O, reads no clock and starts no threads, so the same
  * inputs always produce the same effects.
@@ -90,6 +90,9 @@ public class RaftNode(
     private var configIndex: Long = 0
     private var termStartIndex: Long = Long.MAX_VALUE
     private var catchUp: CatchUp? = null
+    private var readSeq: Long = 0
+    private val pendingReads: MutableList<PendingRead> = ArrayList()
+    private val readAcks: MutableMap<NodeId, Long> = TreeMap()
 
     init {
         require(initialMembers.isNotEmpty()) { "initialMembers must not be empty" }
@@ -126,6 +129,7 @@ public class RaftNode(
             is Input.Receive -> onReceive(input.msg, out)
             is Input.Propose -> onPropose(input, out)
             is Input.ChangeMembership -> onChangeMembership(input, out)
+            is Input.ReadIndex -> onReadIndex(input, out)
         }
         return out
     }
@@ -329,6 +333,8 @@ public class RaftNode(
         pending.clear()
         snapshotSentAt.clear()
         catchUp = null
+        pendingReads.clear()
+        readAcks.clear()
         val next = lastLogIndex() + 1
         for (peer in peers) {
             nextIndex[peer] = next
@@ -367,7 +373,7 @@ public class RaftNode(
                     termAt(next - 1),
                     storage.entries(next, toExclusive),
                     commitIndex,
-                    0,
+                    readSeq,
                 ),
             ),
         )
@@ -504,6 +510,45 @@ public class RaftNode(
         pending.clear()
     }
 
+    private fun onReadIndex(
+        input: Input.ReadIndex,
+        out: MutableList<Effect>,
+    ) {
+        if (role != Role.LEADER) {
+            out.add(Effect.Rejected(input.requestId, Rejection.NotLeader(leaderHint)))
+            return
+        }
+        if (commitIndex < termStartIndex) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Busy))
+            return
+        }
+        readSeq++
+        pendingReads.add(PendingRead(input.requestId, commitIndex, readSeq))
+        confirmReads(out)
+        if (pendingReads.isNotEmpty()) broadcastAppendEntries(out)
+    }
+
+    private fun confirmReads(out: MutableList<Effect>) {
+        if (role != Role.LEADER || pendingReads.isEmpty()) return
+        val iter = pendingReads.iterator()
+        while (iter.hasNext()) {
+            val r = iter.next()
+            if (!hasReadQuorum(r.seq) || lastApplied < r.readIndex) continue
+            iter.remove()
+            out.add(Effect.ReadReady(r.requestId, r.readIndex))
+        }
+    }
+
+    private fun hasReadQuorum(seq: Long): Boolean =
+        members.count { it == id || (readAcks[it] ?: 0L) >= seq } * 2 > members.size
+
+    private fun abandonReads(out: MutableList<Effect>) {
+        for (r in pendingReads) {
+            out.add(Effect.Rejected(r.requestId, Rejection.NotLeader(leaderHint)))
+        }
+        pendingReads.clear()
+    }
+
     private fun onPropose(
         input: Input.Propose,
         out: MutableList<Effect>,
@@ -601,6 +646,7 @@ public class RaftNode(
         role = Role.FOLLOWER
         leaderHint = null
         abandonPending(out)
+        abandonReads(out)
     }
 
     private fun stepDownToHigherTerm(
@@ -617,6 +663,7 @@ public class RaftNode(
             role = Role.FOLLOWER
             if (wasLeader) {
                 abandonPending(out)
+                abandonReads(out)
                 abandonCatchUp(Rejection.NotLeader(leaderHint), out)
             }
         }
@@ -742,6 +789,15 @@ public class RaftNode(
         out: MutableList<Effect>,
     ) {
         if (role != Role.LEADER) return
+        if (msg.readSeq > (readAcks[msg.from] ?: 0L)) readAcks[msg.from] = msg.readSeq
+        applyAppendResult(msg, out)
+        confirmReads(out)
+    }
+
+    private fun applyAppendResult(
+        msg: AppendEntriesResponse,
+        out: MutableList<Effect>,
+    ) {
         val peer = msg.from
         val match = matchIndex[peer] ?: return
         if (msg.success) {
@@ -828,6 +884,12 @@ public class RaftNode(
         var lastMatch: Long = 0
         var idleTicks: Int = 0
     }
+
+    private class PendingRead(
+        val requestId: Long,
+        val readIndex: Long,
+        val seq: Long,
+    )
 
     private companion object {
         const val REASON_TIMEOUT = "election timeout"

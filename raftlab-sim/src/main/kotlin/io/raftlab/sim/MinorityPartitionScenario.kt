@@ -10,7 +10,8 @@ import io.raftlab.trace.NodeId
  * Values: 5 nodes; two clients with 30 operations each over `x`, `y`, `z` starting at 400 ms. The leader is isolated
  * with a minority of 2 at [PARTITION_AT] = 800 ms, a `Put("m", "minority")` is submitted to it at [SUBMIT_AT] = 850 ms,
  * and the partition heals at [HEAL_AT] = 1 800 ms. The leader is awaited within 800 ms, then the run lasts 3 000 ms.
- * Expectations cover the old leader's commit index and log while partitioned, the majority's higher-term commit, the
+ * Expectations cover the old leader's commit index (no entry appended after isolation may commit; entries already in
+ * the log at partition time may still commit from in-flight acks) and log while partitioned, the majority's higher-term commit, the
  * truncation of the minority entry after heal, and agreement of live nodes.
  */
 internal object MinorityPartitionScenario {
@@ -58,7 +59,7 @@ internal object MinorityPartitionScenario {
             }
             awaitLeader(within = 800)
             runFor(3_000)
-            expect("minority commitIndex unchanged") { endCommit == startCommit }
+            expect("minority commitIndex unchanged") { endCommit <= startLast }
             expect("minority log grew") { endLast > startLast }
             expect("no minority write acknowledged while partitioned") { v ->
                 v.history.ofClient(submitId).all { e -> e.returnedAt.let { it == null || it >= HEAL_AT } }

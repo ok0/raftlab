@@ -45,6 +45,7 @@ public class Simulation internal constructor(
     private val hostKv: Boolean = false,
     private val storageFactory: (NodeId) -> RaftStorage = { _ -> InMemoryStorage() },
     private val reopenStorage: Boolean = false,
+    private val requestHook: ClientRequestHook? = null,
 ) {
     /** Creates a simulation with the RaftNode implementation, the given options and invariant checker. */
     public constructor(
@@ -539,7 +540,7 @@ public class Simulation internal constructor(
             val machine = KvStateMachine()
             val node = RaftNode(s.id, s.initialMembers, options.raftConfig, s.storage, machine, s.random, recorder)
             s.kvMachine = machine
-            s.server = KvServer(node)
+            s.server = KvServer(node, machine)
             s.host = RaftNodeHost(node)
         } else {
             s.stateMachine = RecordingStateMachine()
@@ -628,6 +629,11 @@ public class Simulation internal constructor(
         val server = slot(target).server ?: return
         val wireId = nextWireId++
         routes[wireId] = ClientRoute(from, request.requestId)
+        val hooked = requestHook?.answer(this, target, request)
+        if (hooked != null) {
+            reply(ClientResponse(wireId, hooked))
+            return
+        }
         for (out in server.onClientRequest(ClientRequest(wireId, request.command))) {
             when (out) {
                 is KvServerOutput.NodeEffect -> {

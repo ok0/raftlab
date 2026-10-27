@@ -17,6 +17,7 @@ internal class ScenarioRun(
     faults: NetworkFaults?,
     checker: InvariantChecker,
     mutations: Set<Mutation>,
+    requestHook: ClientRequestHook? = null,
 ) : SimulationView {
     private val active: Set<Mutation> = mutations.toSortedSet()
 
@@ -44,6 +45,7 @@ internal class ScenarioRun(
             hostKv = true,
             storageFactory = storageFor(spec.storage),
             reopenStorage = durableProvider != null,
+            requestHook = requestHook,
         )
 
     private val recorder = HistoryRecorder(sim)

@@ -58,6 +58,11 @@ public class KvStateMachine : StateMachine {
     /** Returns a sorted copy of the current key-value data (sessions excluded). Later changes do not affect the copy. */
     public fun dataSnapshot(): Map<String, String> = TreeMap(data)
 
+    /**
+     * Returns the current value of [key], or null; changes neither data nor sessions.
+     */
+    public fun read(key: String): String? = data[key]
+
     internal fun dataForChecks(): Map<String, String> = TreeMap(data)
 
     internal fun sessionForChecks(clientId: String): KvSession? = sessions[clientId]

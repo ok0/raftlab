@@ -35,7 +35,7 @@ class KvCluster(
         ids.withIndex().associate { (i, id) ->
             id to kvNode(id, ids.toSet(), machines.getValue(id), seed * 31 + i, config)
         }
-    val servers: Map<NodeId, KvServer> = nodes.mapValues { KvServer(it.value) }
+    val servers: Map<NodeId, KvServer> = nodes.mapValues { KvServer(it.value, machines.getValue(it.key)) }
     val isolated: MutableSet<NodeId> = mutableSetOf()
     var dropReplies = false
     val dropped: MutableList<ClientResponse> = mutableListOf()

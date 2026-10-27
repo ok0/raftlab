@@ -3,6 +3,7 @@ package io.raftlab.sim
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.raftlab.trace.CommitAdvanced
+import io.raftlab.trace.LogAppended
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
 import org.junit.jupiter.api.Test
@@ -24,8 +25,16 @@ class MinorityPartitionScenarioTest {
                 val oldNode = oldLeader.node
                 val oldTerm = oldLeader.term
                 val commits = r.trace.filterIsInstance<CommitAdvanced>()
+                val lastAtPartition =
+                    r.trace
+                        .filterIsInstance<LogAppended>()
+                        .filter { it.node == oldNode && it.time <= partitionAt }
+                        .maxOf { it.index }
 
-                commits.none { it.node == oldNode && it.time in window } shouldBe true
+                commits
+                    .none {
+                        it.node == oldNode && it.time in window && it.commitIndex > lastAtPartition
+                    }.shouldBe(true)
                 leaders.any { it.node != oldNode && it.term > oldTerm && it.time in window } shouldBe true
                 commits.any { it.node != oldNode && it.time in window } shouldBe true
 

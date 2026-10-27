@@ -32,6 +32,19 @@ public sealed interface Input {
     }
 
     /**
+     * Linearizable read request. Never appends a log entry. A leader that has committed an entry of its current term
+     * records `readIndex = commitIndex`, confirms leadership with a majority of the current configuration acknowledging
+     * a heartbeat round sent after this request, and then emits [Effect.ReadReady]; the caller reads its state machine,
+     * whose applied index is then at least `readIndex`. A non-leader, or a leader that loses leadership while the read
+     * is pending, answers `Effect.Rejected(requestId, Rejection.NotLeader(hint))`; a leader without a current-term commit
+     * answers `Rejection.Busy`. A leader that never regains a quorum never answers.
+     */
+    public data class ReadIndex(
+        /** Caller-chosen id echoed in the eventual [Effect.ReadReady] or [Effect.Rejected]. */
+        public val requestId: Long,
+    ) : Input
+
+    /**
      * Single-server membership change; exactly one of [add] or [remove] must be set. Success is an
      * `Effect.Applied(requestId, index, empty)` when the `Config` entry commits on this leader; otherwise
      * `Effect.Rejected`.

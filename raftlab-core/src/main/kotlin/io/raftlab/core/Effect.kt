@@ -41,4 +41,15 @@ public sealed interface Effect {
         /** Why the request was rejected. */
         public val reason: Rejection,
     ) : Effect
+
+    /**
+     * The read [requestId] is confirmed: leadership was confirmed after the read arrived and the applied index is at
+     * least [readIndex]. The caller may now evaluate the read against its state machine. Emitted at most once per read.
+     */
+    public data class ReadReady(
+        /** Id of the confirmed read request. */
+        public val requestId: Long,
+        /** Commit index recorded when the read arrived. */
+        public val readIndex: Long,
+    ) : Effect
 }
