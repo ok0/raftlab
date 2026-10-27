@@ -2,8 +2,7 @@
 
 raftlab is an educational Raft consensus implementation in Kotlin. It ships a deterministic simulator, fuzzing with injected bugs, a linearizability checker, Mermaid and HTML trace visualizations, and a small TCP key-value cluster.
 
-<!-- Badges: replace OWNER/REPO with your GitHub owner/repository before publishing; see docs/release.md section 8. -->
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/OWNER/REPO/actions/workflows/ci.yml) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Kotlin 2.4.21](https://img.shields.io/badge/Kotlin-2.4.21-7F52FF.svg?logo=kotlin&logoColor=white)](gradle/libs.versions.toml) [![JDK 21+](https://img.shields.io/badge/JDK-21%2B-orange.svg)](https://adoptium.net/) [![Release](https://img.shields.io/github/v/release/OWNER/REPO?include_prereleases)](https://github.com/OWNER/REPO/releases)
+[![CI](https://github.com/ok0/raftlab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ok0/raftlab/actions/workflows/ci.yml) [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE) [![Kotlin 2.4.21](https://img.shields.io/badge/Kotlin-2.4.21-7F52FF.svg?logo=kotlin&logoColor=white)](gradle/libs.versions.toml) [![JDK 21+](https://img.shields.io/badge/JDK-21%2B-orange.svg)](https://adoptium.net/) [![Release](https://img.shields.io/github/v/release/ok0/raftlab?include_prereleases)](https://github.com/ok0/raftlab/releases)
 
 ## Architecture
 
@@ -53,7 +52,7 @@ The diagrams above are generated from the module graph; see [docs/generated/arch
 Run these from the repository root. Each block was executed after `./gradlew clean`; output is pasted as printed, and trimmed parts are marked with `...`.
 
 ```
-git clone https://github.com/OWNER/REPO.git raftlab && cd raftlab
+git clone https://github.com/ok0/raftlab.git raftlab && cd raftlab
 ./gradlew build
 ./gradlew :raftlab-cli:installDist
 alias raftlab="$PWD/raftlab-cli/build/install/raftlab/bin/raftlab"
@@ -265,6 +264,8 @@ Requirements: JDK 21 or newer (the toolchain is 21; CI also runs Gradle on JDK 2
 | `(cd .github/mermaid && npm ci) && scripts/validate-mermaid.sh` | Optional Mermaid validation |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull request workflow and commit message rules, and [docs/README.md](docs/README.md) for the design notes.
+
+Acceptance evidence for every project acceptance criterion, and the checklist to run after the first push, are in [docs/acceptance.md](docs/acceptance.md).
 
 ## Status and limitations
 
