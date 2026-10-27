@@ -11,8 +11,13 @@ import com.github.ajalt.clikt.core.parse
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.output.Localization
 import com.github.ajalt.clikt.output.ParameterFormatter
+import com.github.ajalt.clikt.parameters.options.versionOption
 
 internal class RaftlabCommand : CoreCliktCommand(name = "raftlab") {
+    init {
+        versionOption(RaftlabVersion.current(), names = setOf("--version"), message = { "raftlab version $it\n" })
+    }
+
     override fun help(context: Context): String =
         "Raft lab: simulator scenarios, fuzzing, diagram export, docs, a real TCP node and a KV client. " +
             "Exit codes: 0 success, 1 check failed, 2 usage error."

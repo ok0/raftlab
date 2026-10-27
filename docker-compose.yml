@@ -1,0 +1,45 @@
+# Three-node raftlab cluster (charter R27, PAC6). Usage and the kill/restart demo: docker/README.md
+name: raftlab
+
+x-raftlab-image: &raftlab-image
+  image: ${RAFTLAB_IMAGE:-raftlab:local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      RAFTLAB_VERSION: ${RAFTLAB_VERSION:-0.0.0-dev}
+
+x-raftlab-node: &raftlab-node
+  <<: *raftlab-image
+  restart: "no"
+  stop_grace_period: 20s
+  expose:
+    - "7000"
+
+services:
+  n1:
+    <<: *raftlab-node
+    command: ["node", "--id", "n1", "--cluster", "n1=n1:7000,n2=n2:7000,n3=n3:7000", "--data-dir", "/data"]
+    volumes:
+      - n1-data:/data
+  n2:
+    <<: *raftlab-node
+    command: ["node", "--id", "n2", "--cluster", "n1=n1:7000,n2=n2:7000,n3=n3:7000", "--data-dir", "/data"]
+    volumes:
+      - n2-data:/data
+  n3:
+    <<: *raftlab-node
+    command: ["node", "--id", "n3", "--cluster", "n1=n1:7000,n2=n2:7000,n3=n3:7000", "--data-dir", "/data"]
+    volumes:
+      - n3-data:/data
+  kv:
+    <<: *raftlab-image
+    profiles: ["client"]
+    restart: "no"
+    entrypoint: ["/opt/raftlab/bin/raftlab", "kv", "--cluster", "n1=n1:7000,n2=n2:7000,n3=n3:7000"]
+    command: ["--help"]
+
+volumes:
+  n1-data:
+  n2-data:
+  n3-data:

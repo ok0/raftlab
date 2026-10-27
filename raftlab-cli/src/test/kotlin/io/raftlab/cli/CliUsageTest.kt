@@ -20,6 +20,7 @@ internal class CliUsageTest {
         for (name in listOf("scenario", "export", "docs", "fuzz", "node", "kv")) {
             r.stdout shouldContain name
         }
+        r.stdout shouldContain "--version"
     }
 
     @Test

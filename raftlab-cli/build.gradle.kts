@@ -4,6 +4,12 @@ plugins {
     id("raftlab.kotlin-app")
 }
 
+val cliVersion: String = providers.gradleProperty("raftlab.version").getOrElse("0.0.0-dev")
+require(Regex("[0-9A-Za-z][0-9A-Za-z._-]*").matches(cliVersion)) {
+    "raftlab.version must match [0-9A-Za-z][0-9A-Za-z._-]*, was '$cliVersion'"
+}
+version = cliVersion
+
 dependencies {
     implementation(project(":raftlab-docs"))
     implementation(project(":raftlab-sim"))
@@ -19,6 +25,16 @@ application {
     applicationName = "raftlab"
 }
 
+val versionResourceDir = layout.buildDirectory.dir("generated/raftlab-version")
+val writeVersionProperties =
+    tasks.register<WriteProperties>("writeVersionProperties") {
+        destinationFile.set(versionResourceDir.map { it.file("io/raftlab/cli/raftlab-version.properties") })
+        property("version", cliVersion)
+    }
+sourceSets.named("main") {
+    resources.srcDir(files(versionResourceDir).builtBy(writeVersionProperties))
+}
+
 val docsDir = rootProject.layout.projectDirectory.dir("docs/generated")
 val moduleGraphFile = rootProject.layout.buildDirectory.file("raftlab/module-graph.json")
 val readmeFile = rootProject.layout.projectDirectory.file("README.md")
@@ -32,6 +48,7 @@ tasks.named<Test>("test") {
     systemProperty("raftlab.docs.dir", docsDir.asFile.path)
     systemProperty("raftlab.moduleGraph", moduleGraphFile.get().asFile.path)
     systemProperty("raftlab.readme", readmeFile.asFile.path)
+    systemProperty("raftlab.expectedVersion", cliVersion)
     systemProperty("java.io.tmpdir", testTmp.get().asFile.path)
     doFirst { testTmp.get().asFile.mkdirs() }
     timeout.set(Duration.ofMinutes(3))

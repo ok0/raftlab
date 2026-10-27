@@ -1,0 +1,195 @@
+# Release workflow (charter R1-R9). Cutting a release, the produced artifacts and first-run caveats: docs/release.md
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Check release config
+        run: scripts/check-release-config.sh
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+      - name: Resolve version
+        id: version
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
+            if ! [[ $REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::tag '$REF_NAME' is not vMAJOR.MINOR.PATCH[-PRERELEASE]"; exit 1
+            fi
+            version=${REF_NAME#v}
+          else
+            version="0.0.0-dryrun.${RUN_NUMBER}"
+          fi
+          case $version in *-*) pre=true ;; *) pre=false ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"; echo "prerelease=$pre" >> "$GITHUB_OUTPUT"
+          echo "Release version: $version (prerelease=$pre)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Build, test and package
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ./gradlew build :raftlab-cli:distZip :raftlab-cli:distTar "-Praftlab.version=$VERSION" -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+      - name: Check distribution
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/check-dist.sh "raftlab-cli/build/distributions/raftlab-$VERSION.zip" "$VERSION"
+      - name: Stage archives and checksums
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p build/release-dist
+          cp "raftlab-cli/build/distributions/raftlab-$VERSION.zip" "raftlab-cli/build/distributions/raftlab-$VERSION.tar" build/release-dist/
+          (cd build/release-dist && sha256sum "raftlab-$VERSION.zip" "raftlab-$VERSION.tar" > SHA256SUMS && cat SHA256SUMS)
+      - name: Upload archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-dist
+          path: build/release-dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  image-dry-run:
+    name: Docker build (dry run, no push)
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Build image
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: docker build --build-arg "RAFTLAB_VERSION=$VERSION" -t "raftlab:$VERSION" .
+      - name: Check image
+        shell: bash
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: scripts/check-image.sh "raftlab:$VERSION" "$VERSION"
+
+  publish-image:
+    name: Publish image (GHCR)
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Guard (tag push only)
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != push ] || [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::publishing is only allowed on v* tag pushes"; exit 1
+          fi
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Build image
+        shell: bash
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build --build-arg "RAFTLAB_VERSION=$VERSION" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$image:$VERSION" .
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+      - name: Check image
+        shell: bash
+        run: scripts/check-image.sh "$IMAGE:$VERSION" "$VERSION"
+      - name: Push image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          if [ "$PRERELEASE" != true ]; then docker tag "$IMAGE:$VERSION" "$IMAGE:latest"; docker push "$IMAGE:latest"; fi
+          echo "Pushed $IMAGE:$VERSION" >> "$GITHUB_STEP_SUMMARY"
+      - name: Log out
+        if: always()
+        shell: bash
+        run: docker logout ghcr.io
+
+  publish-release:
+    name: GitHub Release
+    needs: [build, publish-image]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+    steps:
+      - name: Guard (tag push only)
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != push ] || [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::publishing is only allowed on v* tag pushes"; exit 1
+          fi
+      - name: Download archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-dist
+          path: dist
+      - name: Verify checksums
+        shell: bash
+        run: (cd dist && sha256sum -c SHA256SUMS)
+      - name: Create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          flags=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "raftlab $VERSION" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" "dist/raftlab-$VERSION.zip" "dist/raftlab-$VERSION.tar" dist/SHA256SUMS

@@ -1,0 +1,19 @@
+# Build context exclusions. Do NOT use **/build: it would drop the source package
+# build-logic/src/main/kotlin/io/raftlab/build/. Use the explicit */build patterns below.
+.git
+.github
+.gradle
+*/.gradle
+.kotlin
+*/.kotlin
+build
+*/build
+**/node_modules
+.ensemble
+.idea
+**/*.iml
+out
+local.properties
+**/.DS_Store
+docker-compose.yml
+docker
