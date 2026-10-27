@@ -5,36 +5,44 @@ Project dependencies (main configurations) between the Gradle modules, grouped b
 
 ```mermaid
 flowchart TB
-    subgraph g0["Layer 2"]
-        n0["raftlab-docs"]
-        n1["raftlab-viz"]
+    subgraph g0["Layer 1"]
+        n0["raftlab-cli"]
     end
-    subgraph g1["Layer 3"]
-        n2["raftlab-net"]
-        n3["raftlab-sim"]
-        n4["raftlab-storage-file"]
+    subgraph g1["Layer 2"]
+        n1["raftlab-docs"]
+        n2["raftlab-viz"]
     end
-    subgraph g2["Layer 4"]
-        n5["raftlab-kv"]
+    subgraph g2["Layer 3"]
+        n3["raftlab-net"]
+        n4["raftlab-sim"]
+        n5["raftlab-storage-file"]
     end
-    subgraph g3["Layer 5"]
-        n6["raftlab-core"]
+    subgraph g3["Layer 4"]
+        n6["raftlab-kv"]
     end
-    subgraph g4["Layer 6"]
-        n7["raftlab-trace"]
+    subgraph g4["Layer 5"]
+        n7["raftlab-core"]
     end
-    n6 --> n7
-    n0 --> n3
+    subgraph g5["Layer 6"]
+        n8["raftlab-trace"]
+    end
     n0 --> n1
-    n5 --> n6
-    n5 --> n7
-    n2 --> n6
-    n2 --> n5
-    n2 --> n4
-    n2 --> n7
+    n0 --> n3
+    n0 --> n4
+    n0 --> n5
+    n0 --> n2
+    n7 --> n8
+    n1 --> n4
+    n1 --> n2
+    n6 --> n7
+    n6 --> n8
+    n3 --> n7
     n3 --> n6
     n3 --> n5
-    n3 --> n7
+    n3 --> n8
+    n4 --> n7
     n4 --> n6
-    n1 --> n7
+    n4 --> n8
+    n5 --> n7
+    n2 --> n8
 ```

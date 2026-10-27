@@ -7,19 +7,22 @@ System overview by module layer, and the message flow of the first client write 
 
 ```mermaid
 flowchart TB
-    n0["Layer 2 (raftlab-docs, raftlab-viz)"]
-    n1["Layer 3 (raftlab-net, raftlab-sim, raftlab-storage-file)"]
-    n2["Layer 4 (raftlab-kv)"]
-    n3["Layer 5 (raftlab-core)"]
-    n4["Layer 6 (raftlab-trace)"]
+    n0["Layer 1 (raftlab-cli)"]
+    n1["Layer 2 (raftlab-docs, raftlab-viz)"]
+    n2["Layer 3 (raftlab-net, raftlab-sim, raftlab-storage-file)"]
+    n3["Layer 4 (raftlab-kv)"]
+    n4["Layer 5 (raftlab-core)"]
+    n5["Layer 6 (raftlab-trace)"]
     n0 --> n1
-    n0 --> n4
+    n0 --> n2
     n1 --> n2
-    n1 --> n3
-    n1 --> n4
+    n1 --> n5
     n2 --> n3
     n2 --> n4
+    n2 --> n5
     n3 --> n4
+    n3 --> n5
+    n4 --> n5
 ```
 
 ## Client write message flow

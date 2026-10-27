@@ -18,4 +18,5 @@ include(
     ":raftlab-sim",
     ":raftlab-viz",
     ":raftlab-docs",
+    ":raftlab-cli",
 )
