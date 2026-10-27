@@ -4,14 +4,17 @@ import io.raftlab.trace.NodeId
 
 /**
  * A pure, deterministic client state machine. It has no clock, threads or I/O; timeouts are measured by the driver
- * and signalled via [onTimeout]. At most one operation is in flight at a time.
+ * and signalled via [onTimeout]. At most one operation is in flight at a time. The rotation starts with the initial
+ * members in id order; a `NotLeader` hint naming an unknown node adds it to the rotation; `Timeout` and driver
+ * timeouts rotate to the next node in id order.
  */
 public class KvClientCore(
     /** Identifier of this client; must not be blank. */
     public val clientId: String,
+    /** Initial rotation, sorted by id; a `NotLeader` hint naming an unknown node adds it to the rotation. */
     members: Set<NodeId>,
 ) {
-    private val order: List<NodeId> = members.sorted()
+    private val order: MutableList<NodeId> = members.sorted().toMutableList()
 
     /** Target of the next [submit]; updated only by a successful response. */
     public var leaderGuess: NodeId = order.first()
@@ -52,7 +55,15 @@ public class KvClientCore(
 
             is KvResult.NotLeader -> {
                 val hint = r.hint
-                sendTo(if (hint != null && hint in order) hint else next(current.target), current.request.command)
+                if (hint != null) {
+                    if (hint !in order) {
+                        order.add(hint)
+                        order.sort()
+                    }
+                    sendTo(hint, current.request.command)
+                } else {
+                    sendTo(next(current.target), current.request.command)
+                }
             }
 
             KvResult.Timeout -> {

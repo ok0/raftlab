@@ -29,18 +29,29 @@ class RaftNodeRobustnessTest {
     }
 
     @Test
-    fun rejectsIdOutsideMembers() {
-        shouldThrow<IllegalArgumentException> { node(id = NodeId("x"), members = three) }
+    fun acceptsIdOutsideMembersButNotEmptyMembers() {
+        node(id = NodeId("x"), members = three).members shouldBe three
+        shouldThrow<IllegalArgumentException> { node(members = emptySet()) }
     }
 
     @Test
     fun ignoresNonMemberAndMisaddressedMessages() {
         val node = node()
         node.receive(rv(5, NodeId("x9"))) shouldBe emptyList<Effect>()
-        node.receive(ae(5, NodeId("x9"))) shouldBe emptyList<Effect>()
+        node.receive(aer(5, NodeId("x9"))) shouldBe emptyList<Effect>()
+        node.receive(rvr(5, NodeId("x9"))) shouldBe emptyList<Effect>()
         node.receive(rv(5, n2, to = n3)) shouldBe emptyList<Effect>()
         node.receive(rv(5, n1)) shouldBe emptyList<Effect>()
         node.currentTerm shouldBe 0
+    }
+
+    @Test
+    fun acceptsAppendEntriesFromNonMember() {
+        val node = node()
+        node.receive(ae(1, NodeId("x9"))) shouldBe
+            listOf(Effect.Send(AppendEntriesResponse(1, n1, NodeId("x9"), true, 0, 0, 0, 0)))
+        node.currentTerm shouldBe 1
+        node.leaderHint shouldBe NodeId("x9")
     }
 
     @Test

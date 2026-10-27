@@ -79,7 +79,7 @@ internal class SnapshotInvariantsTest {
     }
 
     @Test
-    fun standardCheckerStillHasFiveInvariants() {
+    fun standardCheckerHasSixInvariants() {
         InvariantChecker.standard().invariantNames shouldBe
             listOf(
                 "election-safety",
@@ -87,6 +87,7 @@ internal class SnapshotInvariantsTest {
                 "leader-completeness",
                 "state-machine-safety",
                 "commit-monotonicity",
+                "membership-safety",
             )
     }
 }

@@ -118,6 +118,23 @@ class SimNetworkTest {
     }
 
     @Test
+    fun addedMemberJoinsUnlistedGroupAndRemovedLeaves() {
+        val rec = recorder()
+        val network = net(NetworkFaults(), rec = rec)
+        network.partition(listOf(setOf(n1)))
+        network.addMember(n4)
+        network.connected(n4, n2) shouldBe true
+        network.connected(n4, n1) shouldBe false
+        network.heal()
+        val afterAdd = rec.events.filterIsInstance<PartitionChanged>()
+        afterAdd.last().groups shouldBe listOf(listOf(n1, n2, n3, n4))
+        network.removeMember(n4)
+        network.heal()
+        val afterRemove = rec.events.filterIsInstance<PartitionChanged>()
+        afterRemove.last().groups shouldBe listOf(listOf(n1, n2, n3))
+    }
+
+    @Test
     fun partitionNormalizesAndHeals() {
         val rec = recorder()
         val network = net(NetworkFaults(), rec = rec)

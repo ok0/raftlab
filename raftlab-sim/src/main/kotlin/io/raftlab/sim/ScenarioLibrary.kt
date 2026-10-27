@@ -11,8 +11,8 @@ package io.raftlab.sim
 public object ScenarioLibrary {
     /**
      * All library scenarios keyed by name, in the order `normal-election`, `leader-crash`, `partition-heal`,
-     * `minority-partition`, `client-write`, `fuzz-random`, `restart-all`, `lagging-follower-snapshot`. `restart-all` uses
-     * `StorageKind.Durable` and needs a registered `DurableStorageProvider`.
+     * `minority-partition`, `client-write`, `fuzz-random`, `restart-all`, `lagging-follower-snapshot`,
+     * `membership-add-remove`. `restart-all` uses `StorageKind.Durable` and needs a registered `DurableStorageProvider`.
      */
     public val all: Map<String, Scenario> =
         listOf(
@@ -24,9 +24,10 @@ public object ScenarioLibrary {
             FuzzScenario.scenario,
             RestartAllScenario.scenario,
             LaggingFollowerSnapshotScenario.scenario,
+            MembershipAddRemoveScenario.scenario,
         ).associateBy { it.name }
 
     init {
-        require(all.size == 8) { "duplicate scenario name" }
+        require(all.size == 9) { "duplicate scenario name" }
     }
 }

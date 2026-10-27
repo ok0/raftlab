@@ -17,7 +17,7 @@ public interface SimulationView {
     /** Current virtual time in milliseconds. */
     public val now: Long
 
-    /** Identifiers of all nodes, in index order. */
+    /** Identifiers of all nodes not removed, in index order. */
     public val nodeIds: List<NodeId>
 
     /** Trace events recorded so far, in sequence order. */
@@ -50,6 +50,12 @@ public interface SimulationView {
 
     /** Removes any network partition. */
     public fun heal()
+
+    /** Adds a node; see `Simulation.addNode`. Returns the id of the new node. */
+    public fun addNode(): NodeId
+
+    /** Queues removal of the node with the given [id]; see `Simulation.removeNode`. */
+    public fun removeNode(id: NodeId)
 
     /**
      * Crashes the current leader and returns its id.

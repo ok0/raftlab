@@ -40,7 +40,7 @@ internal fun st(
 
 class LogInvariantsTest {
     @Test
-    fun standardCheckerRunsAllFiveInvariants() {
+    fun standardCheckerRunsAllSixInvariants() {
         InvariantChecker.standard().invariantNames shouldBe
             listOf(
                 "election-safety",
@@ -48,6 +48,7 @@ class LogInvariantsTest {
                 "leader-completeness",
                 "state-machine-safety",
                 "commit-monotonicity",
+                "membership-safety",
             )
     }
 

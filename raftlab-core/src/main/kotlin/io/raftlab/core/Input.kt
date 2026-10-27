@@ -1,5 +1,7 @@
 package io.raftlab.core
 
+import io.raftlab.trace.NodeId
+
 /** An input fed to [RaftNode.step] by a driver. */
 public sealed interface Input {
     /** One unit of logical time. */
@@ -28,4 +30,18 @@ public sealed interface Input {
         /** Renders the request id and the [command] content. */
         override fun toString(): String = "Propose(requestId=$requestId, command=${command.contentToString()})"
     }
+
+    /**
+     * Single-server membership change; exactly one of [add] or [remove] must be set. Success is an
+     * `Effect.Applied(requestId, index, empty)` when the `Config` entry commits on this leader; otherwise
+     * `Effect.Rejected`.
+     */
+    public data class ChangeMembership(
+        /** Caller-chosen id echoed in the eventual [Effect.Applied] or [Effect.Rejected]. */
+        public val requestId: Long,
+        /** Server to add: it first catches up as a non-voting member, then the configuration gains it. */
+        public val add: NodeId?,
+        /** Server to remove from the configuration. */
+        public val remove: NodeId?,
+    ) : Input
 }

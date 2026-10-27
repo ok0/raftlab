@@ -21,6 +21,7 @@ import io.raftlab.trace.NodeId
  * @property partitions Partition windows, in time order.
  * @property crashes Crash windows, lane by lane and in time order within each lane.
  * @property snapshotThreshold Snapshot threshold of every node; low values make snapshots and installs frequent.
+ * @property memberships Membership events, one at a time and in time order.
  */
 internal data class FuzzPlan(
     val nodes: Int,
@@ -34,6 +35,7 @@ internal data class FuzzPlan(
     val partitions: List<PartitionWindow>,
     val crashes: List<CrashWindow>,
     val snapshotThreshold: Int,
+    val memberships: List<MembershipEvent>,
 ) {
     /** Largest number of nodes that may be down at the same time without losing a majority. */
     val maxDown: Int get() = (nodes - 1) / 2
@@ -64,7 +66,32 @@ internal data class FuzzPlan(
         val target: NodeId,
     )
 
+    /**
+     * A membership change at virtual time [at] ms: adds a new node when [add] is true, otherwise removes one.
+     *
+     * With [removeLeader] the current leader is removed when it is a member; otherwise the member at index
+     * `pick % size` of the sorted up members is removed.
+     */
+    data class MembershipEvent(
+        val at: Long,
+        val add: Boolean,
+        val removeLeader: Boolean,
+        val pick: Int,
+    )
+
     companion object {
+        /** Largest number of node ids ever created in a run, including nodes added by membership events. */
+        const val MAX_NODES_WITH_ADDS = 7
+
+        /** Smallest number of members a removal may leave; removals only run while the cluster is larger. */
+        const val MIN_MEMBERS = 3
+
+        /** Upper bound on the number of membership events drawn per run. */
+        const val MEMBERSHIP_EVENTS = 4L
+
+        /** Minimum gap in ms between the times of consecutive membership events. */
+        const val MEMBERSHIP_GAP = 200L
+
         private val DROP_RATES = listOf(0, 10, 30, 60)
         private val DUPLICATE_RATES = listOf(0, 20, 50)
         private val CLIENT_DROP_RATES = listOf(20, 50, 100)
@@ -131,6 +158,39 @@ internal data class FuzzPlan(
 
             val snapshotThreshold = SNAPSHOT_THRESHOLDS[r.nextLong(SNAPSHOT_THRESHOLDS.size.toLong()).toInt()]
 
+            val eventCount = r.nextLong(MEMBERSHIP_EVENTS).toInt()
+            var created = nodes
+            var size = nodes
+            var mCursor = FuzzScenario.FAULT_FROM
+            val memberships = ArrayList<MembershipEvent>()
+            for (k in 0 until eventCount) {
+                val at = mCursor + r.nextLong(800)
+                val wantAdd = r.nextLong(2) == 0L
+                val removeLeader = r.nextLong(3) == 0L
+                val pick = r.nextLong(1000).toInt()
+                if (at > FuzzScenario.FAULT_UNTIL) break
+                val canAdd = created < MAX_NODES_WITH_ADDS
+                val canRemove = size > MIN_MEMBERS
+                val add: Boolean? =
+                    when {
+                        wantAdd && canAdd -> true
+                        !wantAdd && canRemove -> false
+                        canAdd -> true
+                        canRemove -> false
+                        else -> null
+                    }
+                if (add != null) {
+                    memberships += MembershipEvent(at, add, removeLeader, pick)
+                    if (add) {
+                        created++
+                        size++
+                    } else {
+                        size--
+                    }
+                }
+                mCursor = at + MEMBERSHIP_GAP
+            }
+
             return FuzzPlan(
                 nodes = nodes,
                 faults = faults,
@@ -143,6 +203,7 @@ internal data class FuzzPlan(
                 partitions = partitions,
                 crashes = crashes,
                 snapshotThreshold = snapshotThreshold,
+                memberships = memberships,
             )
         }
 

@@ -7,6 +7,7 @@ import io.raftlab.kv.KvCommand
 import io.raftlab.kv.KvOp
 import io.raftlab.kv.KvResult
 import io.raftlab.kv.KvStateMachine
+import io.raftlab.trace.NodeId
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
 import io.raftlab.trace.TraceEvent
@@ -22,6 +23,17 @@ internal object ScenarioChecks {
         val terms = trace.filterIsInstance<RoleChanged>().filter { it.to == Role.LEADER }.map { it.term }
         return terms.size == terms.toSortedSet().size
     }
+
+    fun membersCommitted(
+        nodes: List<NodeView>,
+        expected: Set<NodeId>,
+    ): Boolean =
+        nodes.isNotEmpty() &&
+            nodes.all { n ->
+                n.up &&
+                    n.members == expected &&
+                    n.log.none { it.payload is EntryPayload.Config && it.index > n.commitIndex }
+            }
 
     fun kvAgree(nodes: List<NodeView>): Boolean {
         val live = nodes.filter { it.up }

@@ -12,6 +12,7 @@ import java.util.TreeMap
  * Every operation, including `Get`, is proposed through the log; this is an interim until ReadIndex is available.
  * Internal proposal ids are 1, 2, 3, … in request order. The server relies on the node reporting
  * `Rejection.Unknown` for every pending proposal when it steps down. Each client request gets at most one reply.
+ * `Busy` and `Unknown` map to `Timeout`.
  *
  * @param node the Raft node this server proposes to and reads effects from.
  */
@@ -67,6 +68,7 @@ public class KvServer(
     private fun toResult(reason: Rejection): KvResult =
         when (reason) {
             is Rejection.NotLeader -> KvResult.NotLeader(reason.hint)
+            Rejection.Busy -> KvResult.Timeout
             Rejection.Unknown -> KvResult.Timeout
         }
 }

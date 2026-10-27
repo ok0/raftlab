@@ -1,6 +1,7 @@
 package io.raftlab.sim
 
 import io.raftlab.core.Effect
+import io.raftlab.core.EntryPayload
 import io.raftlab.core.InMemoryStorage
 import io.raftlab.core.Input
 import io.raftlab.core.LogEntry
@@ -22,7 +23,9 @@ import io.raftlab.trace.Role
 import io.raftlab.trace.TraceEvent
 import io.raftlab.trace.TraceEventDraft
 import io.raftlab.trace.TraceRecorder
+import java.util.ArrayDeque
 import java.util.TreeMap
+import java.util.TreeSet
 
 /**
  * A deterministic discrete-event simulation of a Raft cluster.
@@ -68,6 +71,7 @@ public class Simulation internal constructor(
     private inner class NodeSlot(
         val id: NodeId,
         val index: Int,
+        val initialMembers: Set<NodeId>,
     ) {
         var storage: RaftStorage = storageFactory(id)
         var snapshotCache: Snapshot? = storage.loadSnapshot()
@@ -77,7 +81,15 @@ public class Simulation internal constructor(
         var incarnation = 0
         var server: KvServer? = null
         var kvMachine: KvStateMachine? = null
+        var lastMembers: Set<NodeId> = initialMembers
+        var removed = false
     }
+
+    private class MembershipOp(
+        val add: NodeId?,
+        val remove: NodeId?,
+        val target: Set<NodeId>,
+    )
 
     private class ClientRoute(
         val endpoint: ClientEndpoint,
@@ -97,22 +109,32 @@ public class Simulation internal constructor(
 
     private val recorder = TraceRecorder { now }
 
-    /** Node ids `n1`..`nN` in index order. */
-    public val nodeIds: List<NodeId> = (1..options.nodeCount).map { NodeId("n$it") }
+    private val initialIds: List<NodeId> = (1..options.nodeCount).map { NodeId("n$it") }
 
-    private val memberSet = nodeIds.toSet()
-
-    private val network = SimNetwork(options.faults, SimStreams.network(seed), recorder, nodeIds)
+    private val network = SimNetwork(options.faults, SimStreams.network(seed), recorder, initialIds)
 
     private val queue = EventQueue<SimEvent>()
 
-    private val slots = nodeIds.mapIndexed { i, id -> NodeSlot(id, i + 1) }
+    private val slots =
+        ArrayList<NodeSlot>().apply {
+            initialIds.forEachIndexed { i, id -> add(NodeSlot(id, i + 1, initialIds.toSet())) }
+        }
 
     private val found = ArrayList<Violation>()
 
     private var processing = false
 
     private var nextRequestId = 1L
+
+    private val clusterMembers = TreeSet(initialIds)
+
+    private val projected = TreeSet(initialIds)
+
+    private val membershipOps = ArrayDeque<MembershipOp>()
+
+    private var driverScheduled = false
+
+    private var nextMembershipRequestId = MEMBERSHIP_REQUEST_BASE
 
     init {
         require(!hostKv || factory === NodeFactory.RAFT) { "KV hosting requires the RaftNode factory" }
@@ -127,6 +149,9 @@ public class Simulation internal constructor(
         runChecks()
     }
 
+    /** Ids of nodes not removed, in index order (`n1`..`nN`, then nodes added by [addNode]). */
+    public val nodeIds: List<NodeId> get() = slots.filter { !it.removed }.map { it.id }
+
     /** Snapshot of all events recorded so far, in sequence order. */
     public val trace: List<TraceEvent> get() = recorder.events
 
@@ -139,17 +164,19 @@ public class Simulation internal constructor(
     /**
      * Returns a snapshot of the node with the given id.
      *
-     * @param id Node to inspect; must be one of [nodeIds].
+     * A removed node reports its final stopped state.
+     *
+     * @param id Node to inspect; must be one of [nodeIds] or a removed node.
      * @return Snapshot of the node at the current time.
      */
     public fun node(id: NodeId): NodeState = snapshot(slot(id))
 
     /**
-     * Returns snapshots of all nodes in index order.
+     * Returns snapshots of all nodes not removed, in index order.
      *
      * @return One snapshot per node at the current time.
      */
-    public fun nodes(): List<NodeState> = slots.map { snapshot(it) }
+    public fun nodes(): List<NodeState> = slots.filter { !it.removed }.map { snapshot(it) }
 
     /**
      * Returns the state machine of the node's current (or last) incarnation.
@@ -187,14 +214,21 @@ public class Simulation internal constructor(
      */
     public fun crash(id: NodeId) {
         val s = slot(id)
+        if (s.removed) return
         check(s.host != null) { "node ${id.value} is already crashed" }
+        stop(s)
+        afterControl()
+    }
+
+    private fun stop(s: NodeSlot) {
+        val id = s.id
+        s.lastMembers = checkNotNull(s.host).members
         s.snapshotCache = s.storage.loadSnapshot()
         s.host = null
         s.server = null
         s.kvMachine = null
         s.incarnation += 1
         recorder.emit { seq, time -> NodeCrashed(seq, time, id) }
-        afterControl()
     }
 
     /**
@@ -206,6 +240,7 @@ public class Simulation internal constructor(
      */
     public fun restart(id: NodeId) {
         val s = slot(id)
+        if (s.removed) return
         check(s.host == null) { "node ${id.value} is not crashed" }
         if (reopenStorage) s.storage = storageFactory(id)
         s.snapshotCache = s.storage.loadSnapshot()
@@ -221,7 +256,13 @@ public class Simulation internal constructor(
      * @param groups Disjoint, non-empty groups of node ids.
      */
     public fun partition(vararg groups: Set<NodeId>) {
-        network.partition(groups.toList())
+        val removedIds = slots.filter { it.removed }.map { it.id }.toSet()
+        if (removedIds.isEmpty()) {
+            network.partition(groups.toList())
+        } else {
+            val kept = groups.map { it - removedIds }.filter { it.isNotEmpty() }
+            if (kept.isNotEmpty()) network.partition(kept)
+        }
         afterControl()
     }
 
@@ -229,6 +270,98 @@ public class Simulation internal constructor(
     public fun heal() {
         network.heal()
         afterControl()
+    }
+
+    /**
+     * Creates node `n(N+1)` with empty storage and starts it, then queues an `add` membership change.
+     *
+     * The node's initial configuration is the current committed cluster. Membership changes run one at a time in
+     * call order; the new node is in the cluster once the change commits. At most 9 nodes exist in one simulation.
+     *
+     * @return Id of the new node.
+     */
+    public fun addNode(): NodeId {
+        check(slots.size < MAX_NODES) { "a simulation holds at most $MAX_NODES nodes" }
+        val id = NodeId("n${slots.size + 1}")
+        val s = NodeSlot(id, slots.size + 1, clusterMembers.toSet())
+        slots += s
+        network.addMember(id)
+        start(s)
+        recorder.emit { seq, time -> NodeStarted(seq, time, id) }
+        queue.push((now / options.tickMillis + 1) * options.tickMillis, SimEvent.Tick(id, s.incarnation))
+        enqueueMembership(id, null)
+        afterControl()
+        return id
+    }
+
+    /**
+     * Queues a `remove` membership change for a node; once it commits the node is stopped for good.
+     *
+     * A running node is traced as `NodeCrashed` when stopped. A removed node leaves [nodeIds], [nodes] and the
+     * invariants, and later [crash], [restart] and [partition] requests for it are ignored.
+     *
+     * @param id Member to remove; must not be removed or already being removed, and must not be the last member.
+     */
+    public fun removeNode(id: NodeId) {
+        val s = slot(id)
+        require(!s.removed) { "node ${id.value} is already removed" }
+        require(id in projected) { "node ${id.value} is not a member or already being removed" }
+        require(projected.size > 1) { "cannot remove the last member" }
+        enqueueMembership(null, id)
+        afterControl()
+    }
+
+    private fun enqueueMembership(
+        add: NodeId?,
+        remove: NodeId?,
+    ) {
+        if (add != null) projected += add
+        if (remove != null) projected -= remove
+        membershipOps.addLast(MembershipOp(add, remove, projected.toSet()))
+        if (!driverScheduled) {
+            driverScheduled = true
+            queue.push(now, SimEvent.Action { driveMembership() })
+        }
+    }
+
+    private fun driveMembership() {
+        driverScheduled = false
+        val op = membershipOps.peekFirst() ?: return
+        if (membershipCommitted(op)) {
+            membershipOps.removeFirst()
+            clusterMembers.clear()
+            clusterMembers.addAll(op.target)
+            op.remove?.let { retire(slot(it)) }
+        } else {
+            val leader =
+                slots
+                    .filter { !it.removed && it.host?.role == Role.LEADER }
+                    .maxByOrNull { checkNotNull(it.host).currentTerm }
+            if (leader != null) {
+                val host = checkNotNull(leader.host)
+                route(leader, host.step(Input.ChangeMembership(nextMembershipRequestId++, op.add, op.remove)))
+            }
+        }
+        if (membershipOps.isNotEmpty()) {
+            driverScheduled = true
+            queue.push(now + MEMBERSHIP_RETRY_MS, SimEvent.Action { driveMembership() })
+        }
+    }
+
+    private fun membershipCommitted(op: MembershipOp): Boolean {
+        val agreeing =
+            slots.count { s ->
+                val h = s.host
+                !s.removed && h != null && s.id in op.target && h.members == op.target &&
+                    h.log().none { it.payload is EntryPayload.Config && it.index > h.commitIndex }
+            }
+        return agreeing >= op.target.size / 2 + 1
+    }
+
+    private fun retire(s: NodeSlot) {
+        if (s.host != null) stop(s)
+        s.removed = true
+        network.removeMember(s.id)
     }
 
     /**
@@ -331,7 +464,7 @@ public class Simulation internal constructor(
                 p.term,
                 null,
                 p.votedFor,
-                memberSet,
+                s.lastMembers,
                 retainedLog(s.storage, snap?.meta?.lastIndex ?: 0L),
                 0,
                 0,
@@ -404,13 +537,22 @@ public class Simulation internal constructor(
     private fun start(s: NodeSlot) {
         if (hostKv) {
             val machine = KvStateMachine()
-            val node = RaftNode(s.id, memberSet, options.raftConfig, s.storage, machine, s.random, recorder)
+            val node = RaftNode(s.id, s.initialMembers, options.raftConfig, s.storage, machine, s.random, recorder)
             s.kvMachine = machine
             s.server = KvServer(node)
             s.host = RaftNodeHost(node)
         } else {
             s.stateMachine = RecordingStateMachine()
-            s.host = factory.create(s.id, memberSet, options.raftConfig, s.storage, s.stateMachine, s.random, recorder)
+            s.host =
+                factory.create(
+                    s.id,
+                    s.initialMembers,
+                    options.raftConfig,
+                    s.storage,
+                    s.stateMachine,
+                    s.random,
+                    recorder,
+                )
         }
     }
 
@@ -534,5 +676,11 @@ public class Simulation internal constructor(
 
     private fun runChecks() {
         found += checker.check(seed, now, nodes())
+    }
+
+    private companion object {
+        const val MAX_NODES = 9
+        const val MEMBERSHIP_RETRY_MS = 50L
+        const val MEMBERSHIP_REQUEST_BASE = 1L shl 40
     }
 }

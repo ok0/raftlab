@@ -36,14 +36,33 @@ class KvClientCoreTest {
     }
 
     @Test
-    fun notLeaderWithNullOrUnknownHintRotatesAndWraps() {
+    fun notLeaderWithNullHintRotatesAndWraps() {
         val core = newCore()
         core.submit(KvOp.Put("k", "v"))
         (core.reply(KvResult.NotLeader(null)) as KvClientAction.Send).target shouldBe n2
-        (core.reply(KvResult.NotLeader(n9)) as KvClientAction.Send).target shouldBe n3
+        (core.reply(KvResult.NotLeader(null)) as KvClientAction.Send).target shouldBe n3
         val wrapped = core.reply(KvResult.NotLeader(null)) as KvClientAction.Send
         wrapped.target shouldBe n1
         wrapped.request.command.seq shouldBe 1L
+    }
+
+    @Test
+    fun notLeaderWithUnknownHintIsFollowedAndJoinsRotation() {
+        val core = newCore()
+        core.submit(KvOp.Put("k", "v"))
+        (core.reply(KvResult.NotLeader(n9)) as KvClientAction.Send).target shouldBe n9
+        (core.reply(KvResult.Timeout) as KvClientAction.Send).target shouldBe n1
+        (core.reply(KvResult.NotLeader(NodeId("n4"))) as KvClientAction.Send).target shouldBe NodeId("n4")
+        (core.onTimeout() as KvClientAction.Send).target shouldBe n9
+    }
+
+    @Test
+    fun timeoutRotatesPastUnresponsiveNode() {
+        val core = newCore()
+        core.submit(KvOp.Put("k", "v"))
+        (core.onTimeout() as KvClientAction.Send).target shouldBe n2
+        core.reply(KvResult.Ok(null))
+        core.leaderGuess shouldBe n2
     }
 
     @Test

@@ -180,7 +180,7 @@ public class InvariantChecker(
     public companion object {
         /**
          * Returns a checker with the standard invariants: election safety, log matching, leader completeness,
-         * state machine safety and commit monotonicity.
+         * state machine safety, commit monotonicity and membership safety.
          *
          * State machine safety also checks snapshots against applied entries and against each other.
          */
@@ -192,6 +192,7 @@ public class InvariantChecker(
                     LeaderCompleteness(),
                     StateMachineSafety(),
                     CommitMonotonicity(),
+                    MembershipSafety(),
                 ),
             )
 

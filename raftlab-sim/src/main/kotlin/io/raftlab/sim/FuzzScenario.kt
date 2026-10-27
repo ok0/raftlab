@@ -4,6 +4,7 @@ import io.raftlab.kv.KvOp
 import io.raftlab.kv.KvResult
 import io.raftlab.trace.NodeId
 import java.util.TreeMap
+import java.util.TreeSet
 
 /**
  * The `fuzz-random` scenario: the faults, client load and partitions and crashes of each run are drawn from its seed
@@ -14,7 +15,9 @@ import java.util.TreeMap
  * nodes are restarted; a final write to [FINAL_KEY] is submitted to the leader at [FINAL_WRITE_AT]; the run ends at
  * [END]. The interval from [CALM_AT] to [END] is the settle period in which clients finish and the cluster converges.
  * Expectations: one live leader, all nodes up, all client operations completed, logs and data agree, and the final
- * write committed. The snapshot threshold is drawn too, by [FuzzPlan.draw].
+ * write committed. The snapshot threshold is drawn too, by [FuzzPlan.draw]. Membership events drawn by [FuzzPlan] add
+ * or remove one node at a time; a removing node is never crashed or restarted, and the membership of the cluster
+ * must be committed at the end.
  */
 internal object FuzzScenario {
     /** Name of the scenario. */
@@ -46,6 +49,8 @@ internal object FuzzScenario {
         scenario(NAME) {
             val plan = FuzzPlan.draw(seed)
             val crashed = TreeMap<Int, NodeId>()
+            val removing = TreeSet<NodeId>()
+            var expected: Set<NodeId> = (1..plan.nodes).map { NodeId("n$it") }.toSortedSet()
             var finalClient: String? = null
             nodes(plan.nodes)
             faults(plan.faults)
@@ -64,8 +69,8 @@ internal object FuzzScenario {
                 at(w.start) {
                     if (!w.isolateLeader) {
                         partition(w.group)
-                    } else if (leader() != null) {
-                        isolateLeaderWithMinority(w.size)
+                    } else if (leader() != null && nodeIds.size >= 3) {
+                        isolateLeaderWithMinority(minOf(w.size, (nodeIds.size - 1) / 2))
                     }
                 }
                 at(w.end) { heal() }
@@ -73,12 +78,36 @@ internal object FuzzScenario {
             plan.crashes.forEachIndexed { i, w ->
                 at(w.start) {
                     val target = if (w.leader) leader()?.id else w.target
-                    if (target != null && node(target).up && nodes().count { !it.up } < plan.maxDown) {
+                    if (target != null && target !in removing && node(target).up &&
+                        nodes().count { !it.up } < minOf(plan.maxDown, (expected.size - 1) / 2)
+                    ) {
                         crash(target)
                         crashed[i] = target
                     }
                 }
-                at(w.end) { crashed.remove(i)?.let { if (!node(it).up) restart(it) } }
+                at(w.end) { crashed.remove(i)?.let { if (it !in removing && !node(it).up) restart(it) } }
+            }
+            for (m in plan.memberships) {
+                at(m.at) {
+                    if (m.add) {
+                        expected = expected + addNode()
+                    } else {
+                        val l = leader()?.id
+                        val target =
+                            if (m.removeLeader && l != null && l in expected && l !in removing) {
+                                l
+                            } else {
+                                expected.sorted().filter { it !in removing && node(it).up }.let { c ->
+                                    if (c.isEmpty()) null else c[m.pick % c.size]
+                                }
+                            }
+                        if (target != null) {
+                            removing += target
+                            expected = expected - target
+                            removeNode(target)
+                        }
+                    }
+                }
             }
             at(CALM_AT) {
                 heal()
@@ -99,5 +128,6 @@ internal object FuzzScenario {
                 val entry = if (id == null) null else v.history.ofClient(id).singleOrNull()
                 entry?.result is KvResult.Ok
             }
+            expect("membership changes committed") { v -> ScenarioChecks.membersCommitted(v.nodes(), expected) }
         }
 }

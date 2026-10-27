@@ -89,6 +89,14 @@ internal class ScenarioRun(
         act("heal") { sim.heal() }
     }
 
+    /** Adds a node through `Simulation.addNode`; the node joins once the change commits. */
+    override fun addNode(): NodeId = act("addNode") { sim.addNode() }
+
+    /** Queues removal of the node through `Simulation.removeNode`. */
+    override fun removeNode(id: NodeId) {
+        act("removeNode(${id.value})") { sim.removeNode(id) }
+    }
+
     override fun crashLeader(): NodeId =
         act("crashLeader") {
             val id = leader()?.id ?: error("no leader")
@@ -197,6 +205,7 @@ internal class ScenarioRun(
             log = s.log,
             kvData = if (s.up) (sim.kvData(s.id) ?: emptyMap()) else emptyMap(),
             snapshotIndex = s.snapshotIndex,
+            members = s.members,
         )
 
     private fun storageFor(kind: StorageKind): (NodeId) -> RaftStorage {

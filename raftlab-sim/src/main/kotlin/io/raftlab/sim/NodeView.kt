@@ -31,6 +31,8 @@ public data class NodeView(
     public val kvData: Map<String, String>,
     /** Last log index covered by the node's snapshot, or 0 without one. */
     public val snapshotIndex: Long = 0,
+    /** Effective configuration of the node (last known when crashed). */
+    public val members: Set<NodeId> = emptySet(),
 ) {
     /** Last log index: of the last retained entry, or [snapshotIndex] when the retained log is empty. */
     public val lastIndex: Long get() = log.lastOrNull()?.index ?: snapshotIndex

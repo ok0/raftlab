@@ -86,11 +86,13 @@ internal class SimNetwork(
     private var faults: NetworkFaults,
     private val random: RandomSource,
     private val trace: TraceSink,
-    private val members: List<NodeId>,
+    members: List<NodeId>,
 ) {
+    private val members: MutableList<NodeId> = members.toMutableList()
     private var nextMsgId = 1L
     private val lastAt = HashMap<Pair<NodeId, NodeId>, Long>()
     private var groupOf: Map<NodeId, Int>? = null
+    private var unlistedGroup: Int? = null
 
     fun calm() {
         faults = faults.copy(dropRate = 0, duplicateRate = 0, reorder = false)
@@ -147,14 +149,32 @@ internal class SimNetwork(
         val unlisted = members.sorted().filter { it !in all }
         val normalized = if (unlisted.isEmpty()) listed else listed + listOf(unlisted)
         groupOf = normalized.flatMapIndexed { index, group -> group.map { it to index } }.toMap()
+        unlistedGroup = if (unlisted.isEmpty()) null else normalized.lastIndex
         trace.emit { seq, time -> PartitionChanged(seq, time, null, normalized) }
         return normalized
     }
 
     fun heal() {
         groupOf = null
+        unlistedGroup = null
         val all = listOf(members.sorted())
         trace.emit { seq, time -> PartitionChanged(seq, time, null, all) }
+    }
+
+    fun addMember(id: NodeId) {
+        require(id !in members) { "node already in network: ${id.value}" }
+        members += id
+        val current = groupOf
+        if (current != null) {
+            val g = unlistedGroup ?: ((current.values.maxOrNull() ?: -1) + 1)
+            groupOf = current + (id to g)
+            unlistedGroup = g
+        }
+    }
+
+    fun removeMember(id: NodeId) {
+        members -= id
+        groupOf = groupOf?.minus(id)
     }
 
     fun delivered(d: Delivery) {

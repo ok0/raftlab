@@ -8,6 +8,7 @@ import io.raftlab.trace.MessageDropped
 import io.raftlab.trace.MessageDuplicated
 import io.raftlab.trace.NodeCrashed
 import io.raftlab.trace.NodeRestarted
+import io.raftlab.trace.NodeStarted
 import io.raftlab.trace.PartitionChanged
 import io.raftlab.trace.Role
 import io.raftlab.trace.RoleChanged
@@ -52,6 +53,25 @@ internal class FuzzScenarioTest {
         plans.all { it.clientCount * it.opsPerClient <= 200 } shouldBe true
         (plans.any { it.snapshotThreshold <= 8 }) shouldBe true
         (plans.any { it.snapshotThreshold == RaftConfig.DEFAULT_SNAPSHOT_THRESHOLD }) shouldBe true
+        (plans.any { it.memberships.isEmpty() }) shouldBe true
+        (plans.any { p -> p.memberships.any { it.add } }) shouldBe true
+        (plans.any { p -> p.memberships.any { !it.add } }) shouldBe true
+        plans.all { p -> p.memberships.all { it.at <= FuzzScenario.FAULT_UNTIL } } shouldBe true
+        plans.all { p -> p.nodes + p.memberships.count { it.add } <= 7 } shouldBe true
+        plans.all { p -> removalsKeepMoreThanThreeMembers(p) } shouldBe true
+    }
+
+    private fun removalsKeepMoreThanThreeMembers(plan: FuzzPlan): Boolean {
+        var size = plan.nodes
+        for (m in plan.memberships) {
+            if (m.add) {
+                size++
+            } else {
+                if (size <= 3) return false
+                size--
+            }
+        }
+        return true
     }
 
     @Tag("fuzz")
@@ -90,6 +110,22 @@ internal class FuzzScenarioTest {
         (takenSeeds >= 10) shouldBe true
         (installedSeeds >= 3) shouldBe true
         (restartedAfterSnapshotSeeds >= 1) shouldBe true
+        val addSeeds = results.count { r -> r.trace.any { it is NodeStarted && it.time > 0 } }
+        val removeSeeds =
+            results.count { r ->
+                r.trace.filterIsInstance<NodeStarted>().any { s -> r.finalState.none { it.id == s.node } }
+            }
+        val leaderRemovalSeeds =
+            results.count { r ->
+                r.trace.any { it is RoleChanged && it.reason == "removed from configuration" }
+            }
+        println(
+            "fuzz membership coverage: add seeds=$addSeeds, remove seeds=$removeSeeds, " +
+                "leader removal seeds=$leaderRemovalSeeds",
+        )
+        (addSeeds >= 15) shouldBe true
+        (removeSeeds >= 15) shouldBe true
+        (leaderRemovalSeeds >= 3) shouldBe true
     }
 
     private fun restartsAfterSnapshot(trace: List<TraceEvent>): Boolean =

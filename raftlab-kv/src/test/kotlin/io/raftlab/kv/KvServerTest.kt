@@ -103,4 +103,18 @@ class KvServerTest {
         server.onEffects(effects).replies() shouldBe listOf(ClientResponse(42, KvResult.Timeout))
         server.onEffects(listOf(Effect.Rejected(1, Rejection.NotLeader(n3)))) shouldBe emptyList()
     }
+
+    @Test
+    fun rejectionsMapExhaustively() {
+        val (_, server) = deposedLeader()
+        server.onClientRequest(ClientRequest(42, KvCommand("c1", 1, KvOp.Put("k", "v"))))
+        server.onEffects(listOf(Effect.Rejected(1, Rejection.Busy))).replies() shouldBe
+            listOf(ClientResponse(42, KvResult.Timeout))
+        server.onClientRequest(ClientRequest(43, KvCommand("c1", 2, KvOp.Put("k", "v"))))
+        server.onEffects(listOf(Effect.Rejected(2, Rejection.Unknown))).replies() shouldBe
+            listOf(ClientResponse(43, KvResult.Timeout))
+        server.onClientRequest(ClientRequest(44, KvCommand("c1", 3, KvOp.Put("k", "v"))))
+        server.onEffects(listOf(Effect.Rejected(3, Rejection.NotLeader(n3)))).replies() shouldBe
+            listOf(ClientResponse(44, KvResult.NotLeader(n3)))
+    }
 }

@@ -1,6 +1,7 @@
 package io.raftlab.core
 
 import io.raftlab.trace.CommitAdvanced
+import io.raftlab.trace.ConfigChanged
 import io.raftlab.trace.EntryApplied
 import io.raftlab.trace.EntryKind
 import io.raftlab.trace.LogAppended
@@ -15,16 +16,17 @@ import io.raftlab.trace.VoteCast
 import java.util.TreeMap
 
 /**
- * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit, apply, snapshots
- * and InstallSnapshot.
+ * Pure, single-threaded Raft node implementing leader election, voting, log replication, commit, apply, snapshots,
+ * InstallSnapshot and single-server membership change.
  *
  * All behavior is driven by [step]. The node performs no I/O, reads no clock and starts no threads, so the same
  * inputs always produce the same effects.
  *
- * @param initialMembers cluster membership; must contain [id].
+ * @param initialMembers configuration used until the log or a snapshot provides one; must not be empty; may exclude
+ * [id] for a joining server, which then never campaigns.
  */
 public class RaftNode(
-    /** This node's id; must be in initialMembers. */
+    /** This node's id. */
     public val id: NodeId,
     initialMembers: Set<NodeId>,
     private val config: RaftConfig,
@@ -34,8 +36,9 @@ public class RaftNode(
     private val trace: TraceSink,
 ) {
     /**
-     * Cluster membership, sorted by id. On start with a snapshot it is taken from the last config entry of the
-     * retained log, else from the snapshot metadata; an installed snapshot replaces it.
+     * Effective configuration, sorted by id: the latest `Config` entry in the retained log, else the snapshot's
+     * members, else `initialMembers`. Changes when a `Config` entry is appended or truncated, a snapshot is installed,
+     * or on start.
      */
     public var members: Set<NodeId> = initialMembers.sorted().toSet()
         private set
@@ -82,9 +85,14 @@ public class RaftNode(
     private var electionElapsed: Int = 0
     private var electionTimeout: Int = 0
     private var heartbeatElapsed: Int = 0
+    private val baseMembers: Set<NodeId> = initialMembers.sorted().toSet()
+    private var snapshotMembers: Set<NodeId>? = null
+    private var configIndex: Long = 0
+    private var termStartIndex: Long = Long.MAX_VALUE
+    private var catchUp: CatchUp? = null
 
     init {
-        require(id in initialMembers) { "id $id must be a member of $initialMembers" }
+        require(initialMembers.isNotEmpty()) { "initialMembers must not be empty" }
         val s = storage.loadState()
         currentTerm = s.term
         votedFor = s.votedFor
@@ -96,12 +104,16 @@ public class RaftNode(
             snapshotTerm = snap.meta.lastTerm
             commitIndex = snapshotIndex
             lastApplied = snapshotIndex
-            val lastConfig =
-                logSnapshotForChecks().lastOrNull { it.payload is EntryPayload.Config }?.payload as EntryPayload.Config?
-            adoptMembers(lastConfig?.members ?: snap.meta.members)
+            val snapSet = snap.meta.members
+            snapshotMembers = snapSet.sorted().toSet()
         }
+        recomputeMembers()
         resetElectionTimer()
     }
+
+    /** Id of the target of an in-progress catch-up of a server being added, or null when none is in progress. */
+    internal val catchUpTarget: NodeId?
+        get() = catchUp?.target
 
     /**
      * Advances the node by one [input] and returns the effects the driver must carry out, in order.
@@ -113,6 +125,7 @@ public class RaftNode(
             Input.Tick -> onTick(out)
             is Input.Receive -> onReceive(input.msg, out)
             is Input.Propose -> onPropose(input, out)
+            is Input.ChangeMembership -> onChangeMembership(input, out)
         }
         return out
     }
@@ -129,9 +142,38 @@ public class RaftNode(
 
     internal fun matchIndexOf(peer: NodeId): Long? = if (role == Role.LEADER) matchIndex[peer] else null
 
-    private fun adoptMembers(set: Set<NodeId>) {
-        members = set.sorted().toSet()
+    private fun setMembers(next: Set<NodeId>) {
+        val sorted = next.sorted().toSet()
+        if (sorted == members) return
+        members = sorted
         peers = members.filter { it != id }
+        if (role == Role.LEADER) {
+            for (p in peers) {
+                nextIndex.putIfAbsent(p, lastLogIndex() + 1)
+                matchIndex.putIfAbsent(p, 0L)
+            }
+        }
+        val node = id
+        val list = sorted.toList()
+        trace.emit { seq, time -> ConfigChanged(seq, time, node, list) }
+    }
+
+    private fun recomputeMembers() {
+        val last = logSnapshotForChecks().lastOrNull { it.payload is EntryPayload.Config }
+        configIndex = last?.index ?: 0L
+        setMembers((last?.payload as EntryPayload.Config?)?.members ?: snapshotMembers ?: baseMembers)
+    }
+
+    private fun membersAt(index: Long): Set<NodeId> {
+        if (configIndex <= index) return members
+        val entries = if (index <= snapshotIndex) emptyList() else storage.entries(snapshotIndex + 1, index + 1)
+        val cfg = entries.lastOrNull { it.payload is EntryPayload.Config }
+        return (cfg?.payload as EntryPayload.Config?)?.members?.sorted()?.toSet() ?: snapshotMembers ?: baseMembers
+    }
+
+    private fun replicationTargets(): List<NodeId> {
+        val target = catchUp?.target ?: return peers
+        return if (target in peers) peers else peers + target
     }
 
     private fun resetElectionTimer() {
@@ -191,6 +233,11 @@ public class RaftNode(
                 }
             trace.emit { seq, time -> LogAppended(seq, time, node, index, term, kind, summary) }
         }
+        val cfg = entries.lastOrNull { it.payload is EntryPayload.Config }
+        if (cfg != null) {
+            configIndex = cfg.index
+            setMembers((cfg.payload as EntryPayload.Config).members)
+        }
     }
 
     private fun configSummary(members: Set<NodeId>): String =
@@ -200,6 +247,7 @@ public class RaftNode(
         storage.truncateFrom(fromIndex)
         val node = id
         trace.emit { seq, time -> LogTruncated(seq, time, node, fromIndex) }
+        if (fromIndex <= configIndex) recomputeMembers()
     }
 
     private fun firstIndexOfTermAt(index: Long): Long {
@@ -227,6 +275,12 @@ public class RaftNode(
     private fun onTick(out: MutableList<Effect>) {
         ticks++
         if (role == Role.LEADER) {
+            catchUp?.let { c ->
+                c.idleTicks++
+                if (c.idleTicks >= CATCH_UP_TIMEOUTS * config.electionTimeoutTicks.last) {
+                    abandonCatchUp(Rejection.Unknown, out)
+                }
+            }
             heartbeatElapsed++
             if (heartbeatElapsed >= config.heartbeatTicks) {
                 heartbeatElapsed = 0
@@ -234,7 +288,7 @@ public class RaftNode(
             }
         } else {
             electionElapsed++
-            if (electionElapsed >= electionTimeout) startElection(out)
+            if (electionElapsed >= electionTimeout && id in members) startElection(out)
         }
     }
 
@@ -264,7 +318,7 @@ public class RaftNode(
         }
     }
 
-    private fun hasMajority(): Boolean = votesGranted.size * 2 > members.size
+    private fun hasMajority(): Boolean = votesGranted.count { it in members } * 2 > members.size
 
     private fun becomeLeader(out: MutableList<Effect>) {
         emitRoleChanged(role, Role.LEADER, REASON_WON)
@@ -274,18 +328,20 @@ public class RaftNode(
         electionElapsed = 0
         pending.clear()
         snapshotSentAt.clear()
+        catchUp = null
         val next = lastLogIndex() + 1
         for (peer in peers) {
             nextIndex[peer] = next
             matchIndex[peer] = 0
         }
+        termStartIndex = next
         appendToLog(listOf(LogEntry(next, currentTerm, EntryPayload.NoOp)))
         advanceLeaderCommit(out)
         broadcastAppendEntries(out)
     }
 
     private fun broadcastAppendEntries(out: MutableList<Effect>) {
-        for (peer in peers) {
+        for (peer in replicationTargets()) {
             sendAppendEntries(peer, out)
         }
     }
@@ -295,7 +351,7 @@ public class RaftNode(
         out: MutableList<Effect>,
     ) {
         val last = lastLogIndex()
-        val next = nextIndex.getValue(peer).coerceIn(1L, last + 1)
+        val next = nextIndex.getOrPut(peer) { last + 1 }.coerceIn(1L, last + 1)
         if (next <= snapshotIndex) {
             sendInstallSnapshot(peer, out)
             return
@@ -378,8 +434,8 @@ public class RaftNode(
         Mutation.COMMIT_PREVIOUS_TERM_ENTRIES in config.mutations || termAt(index) == currentTerm
 
     private fun advanceLeaderCommit(out: MutableList<Effect>) {
-        if (role != Role.LEADER) return
-        val sorted = (peers.map { matchIndex.getValue(it) } + lastLogIndex()).sortedDescending()
+        if (role != Role.LEADER || members.isEmpty()) return
+        val sorted = members.map { if (it == id) lastLogIndex() else matchIndex[it] ?: 0L }.sortedDescending()
         val quorum = members.size / 2
         val position =
             if (Mutation.COMMIT_WITHOUT_MAJORITY in config.mutations) (quorum - 1).coerceAtLeast(0) else quorum
@@ -396,6 +452,7 @@ public class RaftNode(
         val node = id
         trace.emit { seq, time -> CommitAdvanced(seq, time, node, index) }
         applyCommitted(out)
+        if (role == Role.LEADER && id !in members && configIndex <= commitIndex) stepDownRemoved(out)
     }
 
     private fun applyCommitted(out: MutableList<Effect>) {
@@ -410,9 +467,15 @@ public class RaftNode(
                     out.add(Effect.Applied(pending.remove(entry.index), entry.index, result))
                 }
 
-                EntryPayload.NoOp, is EntryPayload.Config -> {
+                EntryPayload.NoOp -> {
                     lastApplied = entry.index
                     trace.emit { seq, time -> EntryApplied(seq, time, node, entry.index) }
+                }
+
+                is EntryPayload.Config -> {
+                    lastApplied = entry.index
+                    trace.emit { seq, time -> EntryApplied(seq, time, node, entry.index) }
+                    pending.remove(entry.index)?.let { out.add(Effect.Applied(it, entry.index, ByteArray(0))) }
                 }
             }
         }
@@ -423,10 +486,13 @@ public class RaftNode(
         if (lastApplied - snapshotIndex <= config.snapshotThreshold) return
         val index = lastApplied
         val term = termAt(index)
-        storage.saveSnapshot(SnapshotMeta(index, term, members), stateMachine.snapshot())
+        val snapMembers = membersAt(index)
+        storage.saveSnapshot(SnapshotMeta(index, term, snapMembers), stateMachine.snapshot())
         storage.compactTo(index)
         snapshotIndex = index
         snapshotTerm = term
+        snapshotMembers = snapMembers
+        if (configIndex <= index) configIndex = 0
         val node = id
         trace.emit { seq, time -> SnapshotTaken(seq, time, node, index, term) }
     }
@@ -453,6 +519,90 @@ public class RaftNode(
         broadcastAppendEntries(out)
     }
 
+    private fun onChangeMembership(
+        input: Input.ChangeMembership,
+        out: MutableList<Effect>,
+    ) {
+        if (role != Role.LEADER) {
+            out.add(Effect.Rejected(input.requestId, Rejection.NotLeader(leaderHint)))
+            return
+        }
+        if (configIndex > commitIndex || catchUp != null || commitIndex < termStartIndex) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Busy))
+            return
+        }
+        val add = input.add
+        val remove = input.remove
+        val valid =
+            (add == null) != (remove == null) &&
+                (add == null || add !in members) &&
+                (remove == null || (remove in members && members.size > 1))
+        if (!valid) {
+            out.add(Effect.Rejected(input.requestId, Rejection.Unknown))
+            return
+        }
+        if (remove != null) {
+            appendConfig(members - remove, input.requestId, out)
+            return
+        }
+        val target = checkNotNull(add) { "validated add" }
+        catchUp = CatchUp(input.requestId, target, commitIndex)
+        nextIndex[target] = lastLogIndex() + 1
+        matchIndex[target] = 0L
+        snapshotSentAt.remove(target)
+        sendAppendEntries(target, out)
+    }
+
+    private fun appendConfig(
+        next: Set<NodeId>,
+        requestId: Long,
+        out: MutableList<Effect>,
+    ) {
+        val entry = LogEntry(lastLogIndex() + 1, currentTerm, EntryPayload.Config(next.sorted().toSet()))
+        appendToLog(listOf(entry))
+        pending[entry.index] = requestId
+        advanceLeaderCommit(out)
+        if (role == Role.LEADER) broadcastAppendEntries(out)
+    }
+
+    private fun progressCatchUp(
+        peer: NodeId,
+        out: MutableList<Effect>,
+    ): Boolean {
+        val c = catchUp ?: return false
+        if (c.target != peer) return false
+        val m = matchIndex[peer] ?: 0L
+        if (m > c.lastMatch) {
+            c.lastMatch = m
+            c.idleTicks = 0
+        }
+        if (m < c.goal) return false
+        catchUp = null
+        appendConfig(members + peer, c.requestId, out)
+        return true
+    }
+
+    private fun abandonCatchUp(
+        reason: Rejection,
+        out: MutableList<Effect>,
+    ) {
+        val c = catchUp ?: return
+        catchUp = null
+        if (c.target !in members) {
+            nextIndex.remove(c.target)
+            matchIndex.remove(c.target)
+            snapshotSentAt.remove(c.target)
+        }
+        out.add(Effect.Rejected(c.requestId, reason))
+    }
+
+    private fun stepDownRemoved(out: MutableList<Effect>) {
+        emitRoleChanged(Role.LEADER, Role.FOLLOWER, REASON_REMOVED)
+        role = Role.FOLLOWER
+        leaderHint = null
+        abandonPending(out)
+    }
+
     private fun stepDownToHigherTerm(
         term: Long,
         out: MutableList<Effect>,
@@ -465,7 +615,10 @@ public class RaftNode(
             val wasLeader = role == Role.LEADER
             emitRoleChanged(role, Role.FOLLOWER, REASON_HIGHER_TERM)
             role = Role.FOLLOWER
-            if (wasLeader) abandonPending(out)
+            if (wasLeader) {
+                abandonPending(out)
+                abandonCatchUp(Rejection.NotLeader(leaderHint), out)
+            }
         }
     }
 
@@ -473,7 +626,10 @@ public class RaftNode(
         msg: RaftMessage,
         out: MutableList<Effect>,
     ) {
-        if (msg.to != id || msg.from == id || msg.from !in members) return
+        if (msg.to != id || msg.from == id) return
+        if (msg !is AppendEntries && msg !is InstallSnapshot && msg.from !in members && msg.from != catchUp?.target) {
+            return
+        }
         if (msg is RequestVote && msg.preVote) return
         if (msg is RequestVoteResponse && msg.preVote) return
         if (msg.term > currentTerm) stepDownToHigherTerm(msg.term, out)
@@ -594,6 +750,8 @@ public class RaftNode(
             nextIndex[peer] = matchIndex.getValue(peer) + 1
             if (advanced) {
                 advanceLeaderCommit(out)
+                if (role != Role.LEADER) return
+                if (progressCatchUp(peer, out)) return
                 if (nextIndex.getValue(peer) <= lastLogIndex()) sendAppendEntries(peer, out)
             }
         } else {
@@ -627,6 +785,7 @@ public class RaftNode(
         }
         val keep = msg.lastIndex <= lastLogIndex() && termAt(msg.lastIndex) == msg.lastTerm
         storage.saveSnapshot(SnapshotMeta(msg.lastIndex, msg.lastTerm, msg.members), msg.data)
+        snapshotMembers = msg.members.sorted().toSet()
         if (!keep && lastLogIndex() > snapshotIndex) truncateLog(snapshotIndex + 1)
         storage.compactTo(msg.lastIndex)
         stateMachine.restore(msg.data.copyOf())
@@ -634,7 +793,7 @@ public class RaftNode(
         snapshotTerm = msg.lastTerm
         commitIndex = msg.lastIndex
         lastApplied = msg.lastIndex
-        adoptMembers(msg.members)
+        recomputeMembers()
         val node = id
         val li = msg.lastIndex
         val lt = msg.lastTerm
@@ -656,7 +815,18 @@ public class RaftNode(
         matchIndex[peer] = newMatch
         nextIndex[peer] = newMatch + 1
         advanceLeaderCommit(out)
+        if (role != Role.LEADER) return
+        if (progressCatchUp(peer, out)) return
         if (nextIndex.getValue(peer) <= lastLogIndex()) sendAppendEntries(peer, out)
+    }
+
+    private class CatchUp(
+        val requestId: Long,
+        val target: NodeId,
+        val goal: Long,
+    ) {
+        var lastMatch: Long = 0
+        var idleTicks: Int = 0
     }
 
     private companion object {
@@ -664,5 +834,7 @@ public class RaftNode(
         const val REASON_WON = "won election"
         const val REASON_HIGHER_TERM = "higher term"
         const val REASON_LEADER = "leader discovered"
+        const val REASON_REMOVED = "removed from configuration"
+        const val CATCH_UP_TIMEOUTS = 10
     }
 }
