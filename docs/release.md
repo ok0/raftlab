@@ -76,3 +76,13 @@ These checks are manual and are recorded in the milestone report.
 2. The first `vX.Y.Z` tag run creates a Release with the zip, the tar, `SHA256SUMS` and categorized notes, and `sha256sum -c` passes. A `-rc` tag is marked as a pre-release.
 3. `docker pull ghcr.io/<owner>/<repo>:X.Y.Z` works, then `docker run --rm IMAGE --help` and `--version` work. The package has been made public.
 4. The `docker compose up --build` sequence from `docker/README.md` works: put and get, `kill n2`, reads still succeed, `start n2`, earlier data is readable, and `docker compose stop` exits cleanly.
+
+## 8. Before the first push: placeholders and repository settings
+
+The repository contains two kinds of placeholder that must be replaced before the first push to a public fork. Nothing else in the repository is a placeholder.
+
+1. Replace every `OWNER/REPO` in `README.md` with your GitHub `owner/repository`. These occurrences are the badge URLs, the clone URL and the comment above the badges. Find them with `git grep -n OWNER/REPO`, then edit them, or run `sed -i.bak 's#OWNER/REPO#octocat/raftlab#g' README.md && rm README.md.bak` (`octocat/raftlab` is an example).
+2. Replace `[INSERT CONTACT METHOD]` in `CODE_OF_CONDUCT.md` with the maintainer contact method.
+3. Enable private vulnerability reporting: Settings → Code security → Private vulnerability reporting → Enable. `SECURITY.md` depends on it.
+4. `<owner>/<repo>` and `X.Y.Z` in this file and in `docker/README.md` are templates for individual commands. They are not repository placeholders and are not replaced.
+5. After the replacements, `grep -rn "OWNER/REPO\|INSERT CONTACT METHOD" README.md CODE_OF_CONDUCT.md` prints nothing.

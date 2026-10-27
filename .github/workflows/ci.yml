@@ -46,6 +46,12 @@ jobs:
           elapsed=$((SECONDS - start))
           echo "::notice title=Build time (JDK ${{ matrix.java }})::./gradlew build took ${elapsed}s (budget 300s)"
           echo "Build time on JDK ${{ matrix.java }}: ${elapsed}s (budget 300s)" >> "$GITHUB_STEP_SUMMARY"
+      - name: API docs (Dokka)
+        if: matrix.java == '21'
+        run: ./gradlew dokkaGenerate -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+      - name: Code size
+        if: matrix.java == '21'
+        run: ./gradlew countLoc -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
       - name: Coverage reports
         if: matrix.java == '21'
         run: ./gradlew :koverXmlReport :koverHtmlReport -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64

@@ -1,3 +1,5 @@
+import io.raftlab.build.CheckRepoDocsTask
+import io.raftlab.build.CountLocTask
 import io.raftlab.build.ModuleRules
 import io.raftlab.build.VerifyModuleBoundariesTask
 import io.raftlab.build.WriteModuleGraphTask
@@ -64,6 +66,51 @@ tasks.register("generateDocs") {
     dependsOn(":raftlab-docs:generateDocs")
 }
 
+val checkRepoDocs =
+    tasks.register<CheckRepoDocsTask>("checkRepoDocs") {
+        group = "verification"
+        description = "Checks that the repository docs exist and that relative Markdown links resolve"
+        rootDirectory.set(layout.projectDirectory)
+        requiredFiles.set(
+            listOf(
+                "README.md",
+                "LICENSE",
+                "CONTRIBUTING.md",
+                "CODE_OF_CONDUCT.md",
+                "SECURITY.md",
+                ".github/ISSUE_TEMPLATE/bug_report.yml",
+                ".github/ISSUE_TEMPLATE/feature_request.yml",
+                ".github/ISSUE_TEMPLATE/config.yml",
+                ".github/PULL_REQUEST_TEMPLATE.md",
+                "docs/README.md",
+            ),
+        )
+        markdownFiles.from(
+            fileTree(layout.projectDirectory) {
+                include(
+                    "README.md",
+                    "CONTRIBUTING.md",
+                    "CODE_OF_CONDUCT.md",
+                    "SECURITY.md",
+                    ".github/PULL_REQUEST_TEMPLATE.md",
+                    "docker/README.md",
+                    "docs/**/*.md",
+                )
+            },
+        )
+    }
+
+tasks.register<CountLocTask>("countLoc") {
+    group = "help"
+    description = "Prints Kotlin source line counts (main, test, other source sets) per module"
+    rootDirectory.set(layout.projectDirectory)
+    sources.from(
+        fileTree(layout.projectDirectory) {
+            include("raftlab-*/src/*/kotlin/**/*.kt")
+        },
+    )
+}
+
 tasks.named("check") {
-    dependsOn(verifyModuleBoundaries, checkDocs)
+    dependsOn(verifyModuleBoundaries, checkDocs, checkRepoDocs)
 }

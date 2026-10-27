@@ -1,0 +1,61 @@
+name: Bug report
+description: Report incorrect behavior of raftlab
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. Follow SECURITY.md in the repository root instead.
+  - type: input
+    id: scenario
+    attributes:
+      label: Scenario and seed
+      placeholder: "leader-crash, seed 42"
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste the output or a trace excerpt that shows the problem.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: raftlab version or commit
+      description: Output of `raftlab --version`, or the output of `git rev-parse HEAD` for a source build.
+    validations:
+      required: true
+  - type: input
+    id: jdk
+    attributes:
+      label: JDK
+      placeholder: "21"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Mutations used, trace files, or anything else that helps reproduce the problem.
+    validations:
+      required: false
