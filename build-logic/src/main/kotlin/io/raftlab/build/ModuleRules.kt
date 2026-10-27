@@ -22,6 +22,7 @@ object ModuleRules {
 
     val exclusiveDependencies: Map<String, Set<String>> = mapOf(
         ":raftlab-viz" to setOf(":raftlab-trace"),
+        ":raftlab-docs" to setOf(":raftlab-sim", ":raftlab-viz"),
     )
 
     val mainConfigurations: List<String> = listOf("api", "implementation", "compileOnly", "compileOnlyApi", "runtimeOnly")

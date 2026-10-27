@@ -38,6 +38,19 @@ gradle.projectsEvaluated {
     verifyModuleBoundaries.configure { edges.set(encoded) }
 }
 
+val checkDocs =
+    tasks.register("checkDocs") {
+        group = "verification"
+        description = "Fails if docs/generated differs from freshly generated docs"
+        dependsOn(":raftlab-docs:checkDocs")
+    }
+
+tasks.register("generateDocs") {
+    group = "documentation"
+    description = "Regenerates docs/generated (not part of build)"
+    dependsOn(":raftlab-docs:generateDocs")
+}
+
 tasks.named("check") {
-    dependsOn(verifyModuleBoundaries)
+    dependsOn(verifyModuleBoundaries, checkDocs)
 }
