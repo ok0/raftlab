@@ -1,12 +1,12 @@
 # raftlab container image (charter R27). Build: docker build --build-arg RAFTLAB_VERSION=1.2.3 -t raftlab:1.2.3 .
-FROM eclipse-temurin:21-jdk-noble@sha256:57424b1d8eca9c4cf8a4fe226207027911f08d6758628891bf59fcfb53777029 AS build
+FROM eclipse-temurin:24-jdk-noble@sha256:dacac8e9a0df0d2bd24e702b4431132875c249930b70555ebd7ca285b5bee684 AS build
 WORKDIR /src
 COPY . .
 ARG RAFTLAB_VERSION=0.0.0-dev
 RUN --mount=type=cache,target=/root/.gradle \
     ./gradlew --no-daemon :raftlab-cli:installDist "-Praftlab.version=${RAFTLAB_VERSION}"
 
-FROM eclipse-temurin:21-jre-noble@sha256:cd35bb33859641c5374415826a5951845104093eaa401cbe9d3d9023444f1c13
+FROM eclipse-temurin:24-jre-noble@sha256:b416d02335e702b0403ff280de9475a3348e29382285969c9d4e17862ce632e7
 ARG RAFTLAB_VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="raftlab" \
       org.opencontainers.image.description="Raft consensus lab: simulator, CLI and a TCP key-value node" \
